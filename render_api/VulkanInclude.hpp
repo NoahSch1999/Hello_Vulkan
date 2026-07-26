@@ -1,0 +1,8 @@
+#pragma once
+
+// Vulkan and helpers include
+#define VOLK_IMPLEMENTATION
+#include "volk.h"
+#define VMA_IMPLEMENTATION
+#include "vk_mem_alloc.h"
+//

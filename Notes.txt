@@ -1,0 +1,75 @@
+
+
+WHAT THE HECK IS DESCRIPTOR
+
+------------------------------------
+NAMING CONVENTIONS
+------------------------------------
+
+functions:
+    starts with lower-case vk
+    ex: vkCreateCommandPool
+
+create info stuff:
+    starts with upper-case v, aka Vk
+    then has the name of the handle/object
+    then has "CreateInfo"
+    ex: VkCommandPoolCreateInfo
+
+handles/objects:
+    starts with upper-case v, aka Vk
+    then has the name of the handle/object
+    ex: VkCommandPool
+
+VMA FOLLOWS THE SAME STRUCTURE!
+
+------------------------------------
+
+VkInstance - connection between app and vulkan runtime
+
+VkXXXCreateInfo
+    sType => VK_STRUCTURE_TYPE_XXX_CREATE_INFO
+    ex, XXX = Instance: VkInstanceCreateInfo + VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO
+
+VkPhysicalDevice - Handle to actual gpu
+
+VkQueueFamilyProperties + vkGetPhysicalDeviceQueueFamilyProperties gives the different queue types. itterate and "& VK_QUEUE_GRAPHICS_BIT" to find the index of the queue type.
+    this is then used as "queueFamilyIndex"
+
+VkDevice - logical device (similar to d3d12device)
+
+VkQueue - cmdqueue
+
+VmaAllocator - allocator used to allocate memory and bind buffers to it
+
+VkSurfaceKHR - backbuffer surface
+
+VkSwapchainKHR - swapchain
+
+VkImage - texture resource handle
+
+VmaAllocation - an allocation returned by vmaCreateXXX, should be tied to a buffer or image handle. owns the allocated memory
+
+VkImageView - view to image, like srv/cbv/uav except that all types can be created with the same function, aka vkCreateImageView
+
+VkDeviceSize - represents vulkan device memory offset and/or size
+
+VkBuffer - buffer resource handle
+
+VkDeviceAddress - like id3d12resource virtualaddress except that it can be used directly in shaders. Get it via vkGetBufferDeviceAddress
+
+VkSemaphoreCreateInfo - ?
+
+VkFenceCreateInfo - ?
+
+VkCommandBuffer - like id3d12commandlist
+
+VkCommandPool - like id3d12commandallocator. used to allocate command buffers (command lists) via vkAllocateCommandBuffers
+
+VkDescriptorSet - like a descriptor heap, allocated from a pool
+
+VkDescriptorSetLayout - describes the layout of the set
+
+VkDescriptorSetLayoutBinding - describes the bindings in the layout of the set
+
+VkWriteDescriptorSet - used to update a descriptor in a descriptor set
