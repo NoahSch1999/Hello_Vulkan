@@ -73,3 +73,5 @@ VkDescriptorSetLayout - describes the layout of the set
 VkDescriptorSetLayoutBinding - describes the bindings in the layout of the set
 
 VkWriteDescriptorSet - used to update a descriptor in a descriptor set
+
+VkShaderModule - A blob describing a module which is just a combination of shader spirv data

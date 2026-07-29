@@ -38,24 +38,7 @@ namespace aZero::RenderAPI
 			this->InitVma();
 		}
 
-		VkFence CreateFence() const {
-			VkFence fence;
-			VkFenceCreateInfo fenceCI{
-				.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
-				.flags = VK_FENCE_CREATE_SIGNALED_BIT
-			};
-			chkSucceed(vkCreateFence(m_Device, &fenceCI, nullptr, &fence));
-			return fence;
-		}
-
-		VkSemaphore CreateSemaphoreVk() const {
-			VkSemaphore semaphore;
-			VkSemaphoreCreateInfo semaphoreCI{
-				.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO
-			};
-			chkSucceed(vkCreateSemaphore(m_Device, &semaphoreCI, nullptr, &semaphore));
-			return semaphore;
-		}
+		void FlushGPU() const { chkSucceed(vkDeviceWaitIdle(m_Device)); }
 
 		std::string GetPhysicalDeviceName() const {
 			VkPhysicalDeviceProperties2 deviceProperties{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 };
@@ -78,9 +61,6 @@ namespace aZero::RenderAPI
 		VkInstance GetInstance() const { return m_Instance; }
 		VkPhysicalDevice GetPhysicalDevice() const { return m_PhysicalDevice; }
 		VkDevice GetLogicalDevice() const { return m_Device; }
-		VkQueue GetGraphicsQueue() const { return m_GraphicsQueue; }
-		VkQueue GetComputeQueue() const { return m_ComputeQueue; }
-		VkQueue GetCopyQueue() const { return m_CopyQueue; }
 		VmaAllocator GetVmaAllocator() const { return m_VmaAllocator; }
 
 	private:
@@ -88,9 +68,9 @@ namespace aZero::RenderAPI
 		VkPhysicalDevice m_PhysicalDevice;
 		VkDevice m_Device;
 
-		VkQueue m_GraphicsQueue; uint32_t m_GraphicsQueueIndex;
-		VkQueue m_ComputeQueue; uint32_t m_ComputeQueueIndex;
-		VkQueue m_CopyQueue; uint32_t m_CopyQueueIndex;
+		uint32_t m_GraphicsQueueIndex;
+		uint32_t m_ComputeQueueIndex;
+		uint32_t m_CopyQueueIndex;
 
 		VmaAllocator m_VmaAllocator;
 
@@ -105,14 +85,20 @@ namespace aZero::RenderAPI
 				.apiVersion = VK_API_VERSION_1_3
 			};
 
-			uint32_t instanceExtensionsCount{ 0 };
-			char const* const* instanceExtensions{ SDL_Vulkan_GetInstanceExtensions(&instanceExtensionsCount) }; // todo Fix so its not tied to SDL
+			uint32_t sdlExtensionCount = 0;
+			char const* const* sdlExtensions = SDL_Vulkan_GetInstanceExtensions(&sdlExtensionCount);
+			std::vector<const char*> extensions;
+			extensions.reserve(sdlExtensionCount + 1);
+			for (uint32_t i = 0; i < sdlExtensionCount; i++)
+			{
+				extensions.push_back(sdlExtensions[i]);
+			}
 
 			VkInstanceCreateInfo instanceCI{
-				.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO, // type of struct
+				.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
 				.pApplicationInfo = &appInfo,
-				.enabledExtensionCount = static_cast<uint32_t>(instanceExtensionsCount),
-				.ppEnabledExtensionNames = instanceExtensions
+				.enabledExtensionCount = static_cast<uint32_t>(extensions.size()),
+				.ppEnabledExtensionNames = extensions.data()
 			};
 
 			std::vector<const char*> layers;
@@ -172,7 +158,8 @@ namespace aZero::RenderAPI
 				.shaderSampledImageArrayNonUniformIndexing = true,
 				.descriptorBindingVariableDescriptorCount = true,
 				.runtimeDescriptorArray = true,
-				.bufferDeviceAddress = true
+				.timelineSemaphore = VK_TRUE,
+				.bufferDeviceAddress = true,
 			};
 			VkPhysicalDeviceVulkan13Features enabledVk13Features{
 				.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
@@ -186,7 +173,7 @@ namespace aZero::RenderAPI
 			};
 
 			// create logical device
-			const std::vector<const char*> deviceExtensions{ VK_KHR_SWAPCHAIN_EXTENSION_NAME };
+			const std::vector<const char*> deviceExtensions{ VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME };
 
 			const float qfpriorities{ 1.f };
 			VkDeviceQueueCreateInfo graphicsQueueCI{
@@ -223,10 +210,6 @@ namespace aZero::RenderAPI
 			};
 
 			chkSucceed(vkCreateDevice(m_PhysicalDevice, &deviceCI, nullptr, &m_Device));
-
-			vkGetDeviceQueue(m_Device, m_GraphicsQueueIndex, 0, &m_GraphicsQueue);
-			vkGetDeviceQueue(m_Device, m_ComputeQueueIndex, 0, &m_ComputeQueue);
-			vkGetDeviceQueue(m_Device, m_CopyQueueIndex, 0, &m_CopyQueue);
 		}
 
 		void InitVma()

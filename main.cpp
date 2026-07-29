@@ -16,47 +16,54 @@
 #include "render_api/Buffer.hpp"
 #include "render_api/CommandPool.hpp"
 #include "render_api/Sampler.hpp"
-#include "render_api/DescriptorPool.hpp"
+#include "render_api/Descriptor.hpp"
+#include "render_api/Fence.hpp"
+#include "render_api/Semaphore.hpp"
+#include "render_api/CommandQueue.hpp"
 
 class RenderWindow : public aZero::Window::Window_Win32 {
 public:
     RenderWindow() = default;
     explicit RenderWindow(const aZero::Window::WindowDesc& desc)
-        :Window_Win32(desc)
-    {}
+        :Window_Win32(desc) { }
+
+    aZero::RenderAPI::Core* m_Core;
+    aZero::RenderAPI::Swapchain* m_Swapchain;
+    aZero::RenderAPI::DepthStencilImage* m_DsImage;
+    aZero::RenderAPI::ImageView* m_Dsv;
+
 private:
     virtual void PollEventImpl(const SDL_Event& event) override {
         if (GetAsyncKeyState(VK_ESCAPE)) {
             this->Close();
         }
+
+        if (event.type == SDL_EVENT_WINDOW_RESIZED)
+        {
+            m_Swapchain->Resize(event.window.data1, event.window.data2);
+
+            // todo Resize dsv and other stuff
+            aZero::RenderAPI::DepthStencilImage::Desc depthImageDesc{
+                .Width = m_Swapchain->GetLastCreateInfo().imageExtent.width,
+                .Height = m_Swapchain->GetLastCreateInfo().imageExtent.height
+            };
+
+            *m_DsImage = aZero::RenderAPI::DepthStencilImage(*m_Core, depthImageDesc);
+            m_DsImage->Get().Transition({
+                .DstStageMask = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
+                .DstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+                .NewLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+                .SubresourceRange{.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT, .levelCount = 1, .layerCount = 1 }
+                });
+
+            aZero::RenderAPI::ImageView::Desc depthImageViewDesc{
+                .Image = &m_DsImage->Get(),
+                .ImageAspect = aZero::RenderAPI::EImageAspect::DepthStencil
+            };
+            *m_Dsv = aZero::RenderAPI::ImageView(*m_Core, depthImageViewDesc);
+        }
     }
 };
-
-static inline void chk(VkResult result) {
-    if (result != VK_SUCCESS) {
-        std::cerr << "Vulkan call returned an error (" << result << ")\n";
-        exit(result);
-    }
-}
-
-static inline void chk(bool result) {
-    if (!result) {
-        std::cerr << "Call returned an error\n";
-        exit(result);
-    }
-}
-
-bool updateSwapchain = false;
-static inline void chkSwapchain(VkResult result) {
-    if (result < VK_SUCCESS) {
-        if (result == VK_ERROR_OUT_OF_DATE_KHR) {
-            updateSwapchain = true;
-            return;
-        }
-        std::cerr << "Vulkan call returned an error (" << result << ")\n";
-        exit(result);
-    }
-}
 
 aZero::Asset::LegacyMeshData meshData;
 aZero::Asset::ImageData imageData;
@@ -98,88 +105,6 @@ bool LoadAssets(const std::filesystem::path& path)
     imageData = aZero::File::ExtractGltfImage(asset->images[0], asset, path);
 }
 
-/*
-VkInstance - Device, initializes the vulkan lib
-
-*/
-
-/*
-Q:
-- what is VkAllocationCallbacks
-
- chk(vkCreateImage(device, &depthImageCI, nullptr, &depthImage));
-    VkDeviceMemory vkmem;
-    VkMemoryAllocateInfo vkAllocInfo;
-    vkAllocateMemory(device, &vkAllocInfo, nullptr, &vkmem);
-*/
-
-void UploadDataToImage(const aZero::Asset::ImageData& data, VkImage image, VkBuffer stagingBuffer, VkQueue queue, VkDevice device, VkCommandPool commandPool)
-{
-    VkFenceCreateInfo fenceOneTimeCI{ .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
-    VkFence fenceOneTime{};
-    chk(vkCreateFence(device, &fenceOneTimeCI, nullptr, &fenceOneTime));
-    VkCommandBuffer cbOneTime{};
-    VkCommandBufferAllocateInfo cbOneTimeAI{ .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO, .commandPool = commandPool, .commandBufferCount = 1 };
-    chk(vkAllocateCommandBuffers(device, &cbOneTimeAI, &cbOneTime));
-
-    VkCommandBufferBeginInfo cbOneTimeBI{
-    .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-    .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
-    };
-    chk(vkBeginCommandBuffer(cbOneTime, &cbOneTimeBI));
-    VkImageMemoryBarrier2 barrierTexImage{
-        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-        .srcStageMask = VK_PIPELINE_STAGE_2_NONE,
-        .srcAccessMask = VK_ACCESS_2_NONE,
-        .dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-        .dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
-        .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-        .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-        .image = image,
-        .subresourceRange = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = (uint32_t)data.MipLevels.size(), .layerCount = 1}
-    };
-    VkDependencyInfo barrierTexInfo{
-        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-        .imageMemoryBarrierCount = 1,
-        .pImageMemoryBarriers = &barrierTexImage
-    };
-    vkCmdPipelineBarrier2(cbOneTime, &barrierTexInfo);
-    std::vector<VkBufferImageCopy> copyRegions{};
-    for (auto j = 0; j < data.MipLevels.size(); j++) {
-        copyRegions.push_back({
-            .bufferOffset = data.MipLevels[j].Offset,
-            .imageSubresource{.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = (uint32_t)j, .layerCount = 1},
-            .imageExtent{.width = data.BaseWidth >> j, .height = data.BaseHeight >> j, .depth = data.DepthOrArrayCount },
-            });
-    }
-    vkCmdCopyBufferToImage(cbOneTime, stagingBuffer, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, static_cast<uint32_t>(copyRegions.size()), copyRegions.data());
-    VkImageMemoryBarrier2 barrierTexRead{
-        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-        .srcStageMask = VK_PIPELINE_STAGE_TRANSFER_BIT,
-        .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
-        .dstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-        .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
-        .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-        .newLayout = VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL,
-        .image = image,
-        .subresourceRange = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = (uint32_t)data.MipLevels.size(), .layerCount = 1 }
-    };
-    barrierTexInfo.pImageMemoryBarriers = &barrierTexRead;
-    vkCmdPipelineBarrier2(cbOneTime, &barrierTexInfo);
-    chk(vkEndCommandBuffer(cbOneTime));
-    VkCommandBufferSubmitInfo cbOneTimeSubmitInfo{
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
-        .commandBuffer = cbOneTime
-    };
-    VkSubmitInfo2 oneTimeSI{
-        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-        .commandBufferInfoCount = 1,
-        .pCommandBufferInfos = &cbOneTimeSubmitInfo
-    };
-    chk(vkQueueSubmit2(queue, 1, &oneTimeSI, fenceOneTime));
-    chk(vkWaitForFences(device, 1, &fenceOneTime, VK_TRUE, UINT64_MAX));
-}
-
 int main()
 {
     using namespace aZero;
@@ -190,20 +115,22 @@ int main()
         exit(-1);
     }
 
-    chk(SDL_Init(SDL_INIT_VIDEO));
-    chk(SDL_Vulkan_LoadLibrary(NULL));
+    aZero::Window::Init(SDL_INIT_VIDEO);
+
+    SDL_Vulkan_LoadLibrary(NULL);
 
     RenderAPI::Core::Desc coreDesc {
         .ApplicationName = "Hello Vulkan",
         .EnableValidationLayer = true
     };
     RenderAPI::Core core(coreDesc);
+    RenderAPI::CommandQueue graphicsQueue(core, RenderAPI::EQueueType::Graphics);
 
     // setup window and surface (thanks aZeroWindow <3)
     RenderWindow window(aZero::Window::WindowDesc("Hello Vulkan", aZero::Window::WindowDesc::Rect({ 0, 0, 1920, 1080 }), { 0,0,0,0 }, SDL_WINDOW_RESIZABLE, {}));
 
     VkSurfaceKHR surface;
-    chk(SDL_Vulkan_CreateSurface(window.GetSDLWindow(), core.GetInstance(), nullptr, &surface));
+    SDL_Vulkan_CreateSurface(window.GetSDLWindow(), core.GetInstance(), nullptr, &surface);
 
     RenderAPI::Swapchain::Desc swapChainDesc{
         .Surface = surface,
@@ -226,7 +153,14 @@ int main()
         .ImageAspect = RenderAPI::EImageAspect::DepthStencil
     };
 
+    RenderAPI::Semaphore sem(core, RenderAPI::ESemaphoreType::Timeline);
+
     RenderAPI::ImageView depthImageView(core, depthImageViewDesc);
+
+    window.m_Core = &core;
+    window.m_Swapchain = &swapchain;
+    window.m_DsImage = &depthImage;
+    window.m_Dsv = &depthImageView;
 
     RenderAPI::Buffer::Desc vBufferDesc{
         .Size = sizeof(aZero::Asset::Vertex) * meshData.Vertices.size() + sizeof(aZero::Asset::VertexIndex) * meshData.Indices.size(),
@@ -260,23 +194,10 @@ int main()
         shaderDataBuffers[i] = RenderAPI::Buffer(core, shaderDataBufferDesc);
     }
 
-    VkSemaphoreCreateInfo semaphoreCI{
-        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO
-    };
-
-    VkFenceCreateInfo fenceCI{
-        .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
-        .flags = VK_FENCE_CREATE_SIGNALED_BIT
-    };
-
-    std::vector<VkSemaphore> semaphores(swapchain.GetFramesInFlight());
-    std::vector<VkSemaphore> swapchainSemaphores(swapchain.GetFramesInFlight());
-    std::vector<VkFence> fences(swapchain.GetFramesInFlight());
+    std::vector<RenderAPI::Fence> fences(swapchain.GetFramesInFlight());
 
     for (auto i = 0; i < swapchain.GetFramesInFlight(); i++) {
-        semaphores[i] = core.CreateSemaphoreVk();
-        swapchainSemaphores[i] = core.CreateSemaphoreVk();
-        fences[i] = core.CreateFence();
+        fences[i] = RenderAPI::Fence(core);
     }
 
     RenderAPI::CommandPool::Desc cmdPoolDesc{
@@ -284,7 +205,7 @@ int main()
     };
     RenderAPI::CommandPool cmdPool(core, cmdPoolDesc);
 
-    std::vector<VkCommandBuffer> cmdBuffers = cmdPool.CreateCommandBuffers(core, swapchain.GetFramesInFlight());
+    std::vector<RenderAPI::CommandBuffer> cmdBuffers = cmdPool.CreateCommandBuffers(core, swapchain.GetFramesInFlight());
 
     RenderAPI::Image::Desc meshImageDesc{
         .Format = imageData.Format,
@@ -329,21 +250,24 @@ int main()
        .DepthOrArrayCount = imageData.DepthOrArrayCount,
        .MipOffsets = mipOffsets
     };
-    meshImage.Upload(core, cmdPool, imgSrcBuffer, meshImageUploadDesc);
+    meshImage.Upload(core, graphicsQueue, cmdPool, imgSrcBuffer, meshImageUploadDesc);
 
     RenderAPI::Sampler sampler(core, {});
 
+    RenderAPI::DescriptorSet::Desc setDesc{ .Type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .DescriptorCount = 100, .ShaderStages = VkShaderStageFlagBits::VK_SHADER_STAGE_FRAGMENT_BIT };
     RenderAPI::DescriptorPool::Desc descriptorPoolDesc{
-        .Count = 1000
+        .MaxSets = 1,
+        .Sets {setDesc}
     };
     RenderAPI::DescriptorPool descriptorPool(core, descriptorPoolDesc);
+    RenderAPI::DescriptorSet descriptorSet = descriptorPool.CreateDescriptorSet(setDesc);
     RenderAPI::DescriptorHandle descriptorHandle{
         .Sampler = &sampler,
         .View = &meshImageView,
         .Layout = VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL,
         .Index = 0
     };
-    descriptorPool.UploadDescriptor(core, descriptorHandle);
+    descriptorSet.UpdateDescriptor(descriptorHandle);
 
     // create and compile slang shader
     Slang::ComPtr<slang::IGlobalSession> slangGlobalSession;
@@ -391,7 +315,7 @@ int main()
     .pCode = (uint32_t*)spirv->getBufferPointer()
     };
     VkShaderModule shaderModule{};
-    chk(vkCreateShaderModule(core.GetLogicalDevice(), &shaderModuleCI, nullptr, &shaderModule));
+    aZero::RenderAPI::chkSucceed(vkCreateShaderModule(core.GetLogicalDevice(), &shaderModuleCI, nullptr, &shaderModule));
 
     // create pipeline
     VkPushConstantRange pushConstantRange{
@@ -399,7 +323,7 @@ int main()
     .size = sizeof(VkDeviceAddress)
     };
 
-    std::vector<VkDescriptorSetLayout> descLayouts{ descriptorPool.GetLayout() };
+    std::vector<VkDescriptorSetLayout> descLayouts{ descriptorSet.GetLayout() };
     VkPipelineLayoutCreateInfo pipelineLayoutCI{
         .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
         .setLayoutCount = (uint32_t)descLayouts.size(),
@@ -409,7 +333,7 @@ int main()
     };
 
     VkPipelineLayout pipelineLayout;
-    chk(vkCreatePipelineLayout(core.GetLogicalDevice(), &pipelineLayoutCI, nullptr, &pipelineLayout));
+    aZero::RenderAPI::chkSucceed(vkCreatePipelineLayout(core.GetLogicalDevice(), &pipelineLayoutCI, nullptr, &pipelineLayout));
 
     VkVertexInputBindingDescription vertexBinding{
      .binding = 0,
@@ -507,14 +431,21 @@ int main()
     VkPipeline pipeline;
 
     // VkPipelineCache can be used here to cache the result for future re-use. This can be saved and then loaded again between app runs.
-    chk(vkCreateGraphicsPipelines(core.GetLogicalDevice(), VK_NULL_HANDLE, 1, &pipelineCI, nullptr, &pipeline));
+    aZero::RenderAPI::chkSucceed(vkCreateGraphicsPipelines(core.GetLogicalDevice(), VK_NULL_HANDLE, 1, &pipelineCI, nullptr, &pipeline));
 
     uint64_t lastTime{ SDL_GetTicks() };
     uint32_t frameIndex = 0;
-    uint32_t imageIndex{ 0 };
+    //uint32_t imageIndex{ 0 };
 
     glm::vec3 camPos{ 0.0f, 0.0f, -6.0f };
     glm::vec3 objectRotations[3]{};
+
+    depthImage.Get().Transition({
+                .DstStageMask = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
+                .DstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+                .NewLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+                .SubresourceRange{.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT, .levelCount = 1, .layerCount = 1 }
+    });
 
     while (window.IsOpen())
     {
@@ -522,10 +453,10 @@ int main()
 
         // Wait on fence
         // we use fences since we cant read semaphores on the cpu (its only for gpu-synchronization)
-        chk(vkWaitForFences(core.GetLogicalDevice(), 1, &fences[frameIndex], true, UINT64_MAX));
-        chk(vkResetFences(core.GetLogicalDevice(), 1, &fences[frameIndex]));
-        // Acquire next image
-        chkSwapchain(vkAcquireNextImageKHR(core.GetLogicalDevice(), swapchain.Get(), UINT64_MAX, swapchainSemaphores[frameIndex], VK_NULL_HANDLE, &imageIndex)); // might not give us imageIndex that are in consecutive order, so we have a seperate index for the current swapchain and frameindex
+        fences[frameIndex].WaitFor();
+        fences[frameIndex].Reset();
+
+        swapchain.NextFrame(frameIndex);
 
         // Update shader data
         shaderData.projection = glm::perspective(glm::radians(45.0f), (float)window.GetClientDimensions()[0] / (float)window.GetClientDimensions()[1], 0.1f, 32.0f);
@@ -537,17 +468,13 @@ int main()
         shaderDataBuffers[frameIndex].Upload(&shaderData, sizeof(ShaderData), 0);
 
         // Record command buffer
-        auto cb = cmdBuffers[frameIndex];
-        chk(vkResetCommandBuffer(cb, 0)); // reset (needs to be done after checking that its no longer in use)
+        RenderAPI::CommandBuffer& cb = cmdBuffers[frameIndex];
+        cb.Reset(); // reset (needs to be done after checking that its no longer in use)
 
-        VkCommandBufferBeginInfo cbBI{
-            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-            .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
-        };
-        chk(vkBeginCommandBuffer(cb, &cbBI)); // begin recording for real
+        cb.StartRecording(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
 
-        std::array<VkImageMemoryBarrier2, 2> outputBarriers{
-            VkImageMemoryBarrier2{
+        VkImageMemoryBarrier2 outputBarriers[2];
+        outputBarriers[0] = {
                 .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
 
                 // old usage
@@ -562,32 +489,18 @@ int main()
                 .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED, // i dont care about the old layout
                 .newLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, // ready to be used as an attachment. VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL is a combo of all attachment layouts in one enum
 
-                .image = swapchain.GetBackBuffer(imageIndex),
+                .image = swapchain.GetCurrentBackBuffer(),
                 .subresourceRange{.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = 1, .layerCount = 1 }
-            },
-            VkImageMemoryBarrier2{
-                .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-                .srcStageMask = VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
-                .srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-                .dstStageMask = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
-                .dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-                .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-                .newLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
-                .image = depthImage.Get().Get(),
-                .subresourceRange{.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT, .levelCount = 1, .layerCount = 1 }
-            }
         };
-        VkDependencyInfo barrierDependencyInfo{
-            .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-            .imageMemoryBarrierCount = 2,
-            .pImageMemoryBarriers = outputBarriers.data()
-        };
-        vkCmdPipelineBarrier2(cb, &barrierDependencyInfo);
+
+        outputBarriers[1] = depthImage.Get().GetTransition();
+
+        cb.Barrier({ outputBarriers[0], outputBarriers[1] });
         
         // DYNAMIC RENDERING
         VkRenderingAttachmentInfo colorAttachmentInfo{ // specific to dynamic rendering
             .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-            .imageView = swapchain.GetBackBufferView(imageIndex),
+            .imageView = swapchain.GetCurrentBackBufferView(),
             .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
             .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
             .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
@@ -610,7 +523,7 @@ int main()
             .pColorAttachments = &colorAttachmentInfo,
             .pDepthAttachment = &depthAttachmentInfo
         };
-        vkCmdBeginRendering(cb, &renderingInfo);
+        cb.BeginRender(renderingInfo);
         //
 
         // since we made them dynamic when creating the pipeline we overwrite them here
@@ -620,45 +533,26 @@ int main()
             .minDepth = 0.0f,
             .maxDepth = 1.0f
         };
-        vkCmdSetViewport(cb, 0, 1, &vp);
         VkRect2D scissor{ .extent{.width = static_cast<uint32_t>(window.GetClientDimensions()[0]), .height = static_cast<uint32_t>(window.GetClientDimensions()[1]) } };
-        vkCmdSetScissor(cb, 0, 1, &scissor);
+        cb.SetScizzorRectsAndViewports({ vp }, { scissor });
 
-        vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
-        VkDeviceSize vOffset{ 0 };
-        std::vector<VkDescriptorSet> descSets{ descriptorPool.GetSet() };
-        vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, (uint32_t)descSets.size(), descSets.data(), 0, nullptr);
+        vkCmdBindPipeline(cb.Get(), VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+        std::vector<VkDescriptorSet> descSets{ descriptorSet.Get() };
+        vkCmdBindDescriptorSets(cb.Get(), VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, (uint32_t)descSets.size(), descSets.data(), 0, nullptr);
         
-        std::vector<VkBuffer> vBuffers{ vBuffer.Get() };
-        vkCmdBindVertexBuffers(cb, 0, 1, vBuffers.data(), &vOffset);
-        vkCmdBindIndexBuffer(cb, vBuffer.Get(), sizeof(aZero::Asset::Vertex) * meshData.Vertices.size(), VK_INDEX_TYPE_UINT32);
-
+        cb.SetVertexBuffer(vBuffer, 0);
+        cb.SetIndexBuffer(vBuffer, sizeof(aZero::Asset::Vertex) * meshData.Vertices.size());
+       
         auto pushconst = shaderDataBuffers[frameIndex].GetDeviceAddress().value();
-        vkCmdPushConstants(cb, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(VkDeviceAddress), &pushconst);
+        vkCmdPushConstants(cb.Get(), pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(VkDeviceAddress), &pushconst);
 
-        vkCmdDrawIndexed(cb, meshData.Indices.size(), 3, 0, 0, 0);
+        cb.DrawIndexed((uint32_t)meshData.Indices.size(), 3, 0, 0, 0);
 
-        vkCmdEndRendering(cb); // finish render pass
+        cb.EndRender();
 
-        VkImageMemoryBarrier2 barrierPresent{
-            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-            .srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-            .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-            .dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-            .dstAccessMask = 0,
-            .oldLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
-            .newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-            .image = swapchain.GetBackBuffer(imageIndex),
-            .subresourceRange{.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = 1, .layerCount = 1 }
-        };
-        VkDependencyInfo barrierPresentDependencyInfo{
-            .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-            .imageMemoryBarrierCount = 1,
-            .pImageMemoryBarriers = &barrierPresent
-        };
-        vkCmdPipelineBarrier2(cb, &barrierPresentDependencyInfo);
+        swapchain.CompleteFrame(cb);
 
-        vkEndCommandBuffer(cb); // end recording
+        cb.StopRecording();
 
         /*
         before we start outputting to the swapchain image we need to guarantee that the current swapchain image isnt in use by the present-engine.
@@ -670,51 +564,27 @@ int main()
 
         also, we use both frameIndex and imageIndex since the frameIndex might not match the actual imageIndex that is returned by vkAcquireNextImageKHR (since it might not give consecutive indices).
         */
-
-        // Submit command buffer
-        VkSemaphoreSubmitInfo waitSemaphoreInfo{
-            .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
-            .semaphore = swapchainSemaphores[frameIndex], // this ensured that we wait to start the stageMask stage until this semaphore has been signalled (since its used as pWaitSemaphoreInfos) before executing further commands in the buffer
-            .stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, // this makes the wait happen on the color attachment stage, so prior work can still be done
-        };
-        VkSemaphoreSubmitInfo signalSemaphoreInfo{
-            .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
-            .semaphore = semaphores[imageIndex], // this is signalled when the command buffer has passed the stageMask point (since its used as pSignalSemaphoreInfos)
-            .stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-        };
-        VkCommandBufferSubmitInfo commandBufferSubmitInfo{
-            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
-            .commandBuffer = cb
-        };
-        VkSubmitInfo2 submitInfo{
-            .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-            .waitSemaphoreInfoCount = 1,
-            .pWaitSemaphoreInfos = &waitSemaphoreInfo, // ensured that the command buffer isnt executed until the swapchain image has been released to the presentation engine and is free to be presented
-            .commandBufferInfoCount = 1,
-            .pCommandBufferInfos = &commandBufferSubmitInfo,
-            .signalSemaphoreInfoCount = 1,
-            .pSignalSemaphoreInfos = &signalSemaphoreInfo, // this ensures that presentation of the swapchain image does not begin until the command buffer has finished execution
+        RenderAPI::CommandQueue::SubmitDesc submitDesc{
+            .CommandBufferPtr = &cb,
+            .OnCompletionFence = &fences[frameIndex],
+            .WaitOnSemaphores = {{.SemaphorePtr = &swapchain.GetImageReadySemaphore(), .Stage = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT}},
+            .SignalSemaphores = {{.SemaphorePtr = &swapchain.GetRenderCompletedSemaphore(), .Stage = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT}}
         };
 
-        // we signal the fence since we cant read semaphores on the cpu (its only for gpu-synchronization)
-        chk(vkQueueSubmit2(core.GetGraphicsQueue(), 1, &submitInfo, fences[frameIndex]));
+        graphicsQueue.SubmitCommandBuffers(submitDesc);
+
+        RenderAPI::Swapchain::PresentDesc presentDesc{
+            .Queue = &graphicsQueue,
+            .WaitOnSemaphores = { &swapchain.GetRenderCompletedSemaphore() }
+        };
+        swapchain.Present(presentDesc);
 
         frameIndex = (frameIndex + 1) % swapchain.GetFramesInFlight();
 
-        std::vector<VkSwapchainKHR> swapchains{ swapchain.Get() };
-        // Present image
-        VkPresentInfoKHR presentInfo{
-            .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
-            .waitSemaphoreCount = 1,
-            .pWaitSemaphores = &semaphores[imageIndex], // here we wait on the semaphore that is signalled when the command buffer has passed the OM
-            .swapchainCount = (uint32_t)swapchains.size(),
-            .pSwapchains = swapchains.data(),
-            .pImageIndices = &imageIndex
-        };
-        chkSwapchain(vkQueuePresentKHR(core.GetGraphicsQueue(), &presentInfo));
-
         // Poll events
     }
+
+    aZero::Window::Shutdown();
 
 	return 0;
 }

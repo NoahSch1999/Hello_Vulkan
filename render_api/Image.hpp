@@ -1,6 +1,7 @@
 #pragma once
 #include "CommandPool.hpp"
 #include "Buffer.hpp"
+#include "CommandQueue.hpp"
 
 namespace aZero::RenderAPI
 {
@@ -162,10 +163,42 @@ namespace aZero::RenderAPI
 
             chkSucceed(vmaCreateImage(core.GetVmaAllocator(), &depthImageCI, &allocCI, &m_Image, &m_Allocation, nullptr));
 
+            m_LastBarrier = {
+                .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+                .srcStageMask = VK_PIPELINE_STAGE_2_NONE,
+                .srcAccessMask = 0,
+                .dstStageMask = VK_PIPELINE_STAGE_2_NONE,
+                .dstAccessMask = VK_ACCESS_2_NONE,
+                .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+                .newLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+                .image = m_Image,
+                .subresourceRange = { .aspectMask = VK_IMAGE_ASPECT_NONE, .levelCount = 1, .layerCount = 1 }
+            };
+
             m_Desc = desc;
         }
 
-        void Upload(const Core& core, const CommandPool& commandPool, const Buffer& stagingBuffer, const UploadDesc& uploadDesc)
+        struct TransitionDesc
+        {
+            VkPipelineStageFlags2 DstStageMask;
+            VkAccessFlags2 DstAccessMask;
+            VkImageLayout NewLayout;
+            VkImageSubresourceRange SubresourceRange;
+        };
+
+        void Transition(const TransitionDesc& desc)
+        {
+            m_LastBarrier.srcStageMask = m_LastBarrier.dstStageMask;
+            m_LastBarrier.srcAccessMask = m_LastBarrier.dstAccessMask;
+            m_LastBarrier.oldLayout = m_LastBarrier.newLayout;
+
+            m_LastBarrier.dstStageMask = desc.DstStageMask;
+            m_LastBarrier.dstAccessMask = desc.DstAccessMask;
+            m_LastBarrier.newLayout = desc.NewLayout;
+            m_LastBarrier.subresourceRange = desc.SubresourceRange;
+        }
+
+        void Upload(const Core& core, CommandQueue& commandQueue, const CommandPool& commandPool, const Buffer& stagingBuffer, const UploadDesc& uploadDesc)
         {
             VkFenceCreateInfo fenceOneTimeCI{ .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
             VkFence fenceOneTime{};
@@ -179,21 +212,18 @@ namespace aZero::RenderAPI
             .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
             };
             chkSucceed(vkBeginCommandBuffer(cbOneTime, &cbOneTimeBI));
-            VkImageMemoryBarrier2 barrierTexImage{
-                .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-                .srcStageMask = VK_PIPELINE_STAGE_2_NONE,
-                .srcAccessMask = VK_ACCESS_2_NONE,
-                .dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-                .dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-                .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                .image = m_Image,
-                .subresourceRange = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = (uint32_t)uploadDesc.MipOffsets.size(), .layerCount = 1}
-            };
+
+            this->Transition({
+                .DstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                .DstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                .NewLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                .SubresourceRange = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = (uint32_t)uploadDesc.MipOffsets.size(), .layerCount = 1}
+            });
+
             VkDependencyInfo barrierTexInfo{
                 .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
                 .imageMemoryBarrierCount = 1,
-                .pImageMemoryBarriers = &barrierTexImage
+                .pImageMemoryBarriers = &m_LastBarrier
             };
             vkCmdPipelineBarrier2(cbOneTime, &barrierTexInfo);
             std::vector<VkBufferImageCopy> copyRegions{};
@@ -205,20 +235,17 @@ namespace aZero::RenderAPI
                     });
             }
             vkCmdCopyBufferToImage(cbOneTime, stagingBuffer.Get(), m_Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, static_cast<uint32_t>(copyRegions.size()), copyRegions.data());
-            VkImageMemoryBarrier2 barrierTexRead{
-                .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-                .srcStageMask = VK_PIPELINE_STAGE_TRANSFER_BIT,
-                .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
-                .dstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-                .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
-                .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                .newLayout = VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL,
-                .image = m_Image,
-                .subresourceRange = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = (uint32_t)uploadDesc.MipOffsets.size(), .layerCount = 1 }
-            };
-            barrierTexInfo.pImageMemoryBarriers = &barrierTexRead;
+
+            this->Transition({
+                .DstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                .DstAccessMask = VK_ACCESS_SHADER_READ_BIT,
+                .NewLayout = VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL,
+                .SubresourceRange = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = (uint32_t)uploadDesc.MipOffsets.size(), .layerCount = 1}
+            });
+            barrierTexInfo.pImageMemoryBarriers = &m_LastBarrier;
             vkCmdPipelineBarrier2(cbOneTime, &barrierTexInfo);
             chkSucceed(vkEndCommandBuffer(cbOneTime));
+
             VkCommandBufferSubmitInfo cbOneTimeSubmitInfo{
                 .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
                 .commandBuffer = cbOneTime
@@ -228,17 +255,20 @@ namespace aZero::RenderAPI
                 .commandBufferInfoCount = 1,
                 .pCommandBufferInfos = &cbOneTimeSubmitInfo
             };
-            chkSucceed(vkQueueSubmit2(core.GetGraphicsQueue(), 1, &oneTimeSI, fenceOneTime));
+            chkSucceed(vkQueueSubmit2(commandQueue.Get(), 1, &oneTimeSI, fenceOneTime));
             chkSucceed(vkWaitForFences(core.GetLogicalDevice(), 1, &fenceOneTime, VK_TRUE, UINT64_MAX));
         }
 
         VkImage Get() const { return m_Image; }
-        Desc GetDesc() const { return m_Desc; }
+        const Desc& GetDesc() const { return m_Desc; }
+        const VkImageMemoryBarrier2& GetTransition() const { return m_LastBarrier; }
+        void OverrideInternalMemoryBarrier(const VkImageMemoryBarrier2& barrier) { m_LastBarrier = barrier; }
 
     private:
         VkImage m_Image;
         VmaAllocation m_Allocation;
         Desc m_Desc;
+        VkImageMemoryBarrier2 m_LastBarrier;
     };
 
     class ImageView

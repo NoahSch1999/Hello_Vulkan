@@ -48,7 +48,7 @@ namespace aZero::RenderAPI
             m_Image = RenderAPI::Image(core, imageDesc);
         }
 
-        const RenderAPI::Image& Get() const { return m_Image; }
+        RenderAPI::Image& Get() { return m_Image; }
 
     private:
         RenderAPI::Image m_Image;
