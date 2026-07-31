@@ -1,0 +1,47 @@
+{
+    "parameters": [
+        {
+            "name": "textures",
+            "binding": {"kind": "descriptorTableSlot", "index": 0},
+            "type": {
+                "kind": "array",
+                "elementCount": 0,
+                "elementType": {
+                    "kind": "resource",
+                    "baseShape": "texture2D",
+                    "combined": true,
+                    "resultType": {
+                        "kind": "vector",
+                        "elementCount": 4,
+                        "elementType": {
+                            "kind": "scalar",
+                            "scalarType": "float32"
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "name": "cb",
+            "binding": {"kind": "descriptorTableSlot", "index": 1},
+            "type": {
+                "kind": "constantBuffer",
+                "elementType": {
+                    "kind": "scalar",
+                    "scalarType": "int32"
+                },
+                "containerVarLayout": {
+                    "binding": {"kind": "descriptorTableSlot", "index": 0}
+                },
+                "elementVarLayout": {
+                    "type": {
+                        "kind": "scalar",
+                        "scalarType": "int32"
+                    },
+                    "binding": {"kind": "uniform", "offset": 0, "size": 4, "elementStride": 0}
+                }
+            }
+        }
+    ],
+    "bindlessSpaceIndex": 1
+}

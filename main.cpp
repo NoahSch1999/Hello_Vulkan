@@ -1,9 +1,6 @@
 #include <iostream>
 #include <vector>
 
-#include "slang.h"
-#include "slang/slang-com-ptr.h"
-
 #include <SDL3/SDL_vulkan.h>
 
 #include "aZeroWindow.hpp"
@@ -20,6 +17,8 @@
 #include "render_api/Fence.hpp"
 #include "render_api/Semaphore.hpp"
 #include "render_api/CommandQueue.hpp"
+#include "render_api/Compiler.hpp"
+#include "render_api/RenderPass.hpp"
 
 class RenderWindow : public aZero::Window::Window_Win32 {
 public:
@@ -254,7 +253,7 @@ int main()
 
     RenderAPI::Sampler sampler(core, {});
 
-    RenderAPI::DescriptorSet::Desc setDesc{ .Type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .DescriptorCount = 100, .ShaderStages = VkShaderStageFlagBits::VK_SHADER_STAGE_FRAGMENT_BIT };
+    RenderAPI::DescriptorSet::Desc setDesc{ .Type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .DescriptorCount = 1024, .ShaderStages = VkShaderStageFlagBits::VK_SHADER_STAGE_ALL };
     RenderAPI::DescriptorPool::Desc descriptorPoolDesc{
         .MaxSets = 1,
         .Sets {setDesc}
@@ -270,168 +269,41 @@ int main()
     descriptorSet.UpdateDescriptor(descriptorHandle);
 
     // create and compile slang shader
-    Slang::ComPtr<slang::IGlobalSession> slangGlobalSession;
-    slang::createGlobalSession(slangGlobalSession.writeRef());
-
-    auto slangTargets{ std::to_array<slang::TargetDesc>({ {
-    .format{SLANG_SPIRV},
-    .profile{slangGlobalSession->findProfile("spirv_1_4")}} }) };
-
-    auto slangOptions = std::to_array<slang::CompilerOptionEntry>({
-    {
-        slang::CompilerOptionName::EmitSpirvDirectly,
-        {slang::CompilerOptionValueKind::Int, 1}
-    },
-    {
-        slang::CompilerOptionName::DebugInformation,
-        {slang::CompilerOptionValueKind::Int, SLANG_DEBUG_INFO_LEVEL_STANDARD}
-    },
-    {
-        slang::CompilerOptionName::Optimization,
-        {slang::CompilerOptionValueKind::Int, SLANG_OPTIMIZATION_LEVEL_NONE}
-    }
+    Compiler::Compiler compiler(core);
+    Compiler::CompilerSession::Desc d;
+    d.CompilerOptions = std::vector<slang::CompilerOptionEntry>({
+        {
+            slang::CompilerOptionName::EmitSpirvDirectly,
+            {slang::CompilerOptionValueKind::Int, 1}
+        },
+        {
+            slang::CompilerOptionName::DebugInformation,
+            {slang::CompilerOptionValueKind::Int, SLANG_DEBUG_INFO_LEVEL_STANDARD}
+        },
+        {
+            slang::CompilerOptionName::Optimization,
+            {slang::CompilerOptionValueKind::Int, SLANG_OPTIMIZATION_LEVEL_NONE}
+        }
     });
+    d.PreprocessorMacros.push_back({ "HELLO", "" });
 
-    slang::SessionDesc slangSessionDesc{
-        .targets{slangTargets.data()},
-        .targetCount{SlangInt(slangTargets.size())},
-        .defaultMatrixLayoutMode = SLANG_MATRIX_LAYOUT_COLUMN_MAJOR,
-        .compilerOptionEntries{slangOptions.data()},
-        .compilerOptionEntryCount{uint32_t(slangOptions.size())}
-    };
-    Slang::ComPtr<slang::ISession> slangSession;
-    slangGlobalSession->createSession(slangSessionDesc, slangSession.writeRef());
+    Compiler::CompilerSession session = compiler.CreateSession(d).value();
 
-    Slang::ComPtr<slang::IModule> slangModule{
-    slangSession->loadModuleFromSource("triangle", "C:/Projects/Programming/Hello_Vulkan/Loading_Assets/shader.slang", nullptr, nullptr)
-    };
-    Slang::ComPtr<ISlangBlob> spirv;
-    slangModule->getTargetCode(0, spirv.writeRef());
+    Compiler::ShaderModule module = session.LoadModule("C:/Projects/Programming/Hello_Vulkan/Loading_Assets/pixel.slang").value();
 
-
-    VkShaderModuleCreateInfo shaderModuleCI{
-    .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
-    .codeSize = spirv->getBufferSize(),
-    .pCode = (uint32_t*)spirv->getBufferPointer()
-    };
-    VkShaderModule shaderModule{};
-    aZero::RenderAPI::chkSucceed(vkCreateShaderModule(core.GetLogicalDevice(), &shaderModuleCI, nullptr, &shaderModule));
-
-    // create pipeline
-    VkPushConstantRange pushConstantRange{
-    .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
-    .size = sizeof(VkDeviceAddress)
-    };
-
-    std::vector<VkDescriptorSetLayout> descLayouts{ descriptorSet.GetLayout() };
-    VkPipelineLayoutCreateInfo pipelineLayoutCI{
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-        .setLayoutCount = (uint32_t)descLayouts.size(),
-        .pSetLayouts = descLayouts.data(),
-        .pushConstantRangeCount = 1,
-        .pPushConstantRanges = &pushConstantRange
-    };
-
-    VkPipelineLayout pipelineLayout;
-    aZero::RenderAPI::chkSucceed(vkCreatePipelineLayout(core.GetLogicalDevice(), &pipelineLayoutCI, nullptr, &pipelineLayout));
-
-    VkVertexInputBindingDescription vertexBinding{
-     .binding = 0,
-     .stride = sizeof(aZero::Asset::Vertex),
-     .inputRate = VK_VERTEX_INPUT_RATE_VERTEX
-    };
-
-    std::vector<VkVertexInputAttributeDescription> vertexAttributes{ // input layout
-    {.location = 0, .binding = 0, .format = VK_FORMAT_R32G32B32_SFLOAT },
-    {.location = 1, .binding = 0, .format = VK_FORMAT_R32_UINT, .offset = sizeof(glm::vec3) },
-    {.location = 2, .binding = 0, .format = VK_FORMAT_R32_UINT, .offset = sizeof(glm::vec3) + sizeof(uint32_t)},
-    };
-
-    VkPipelineVertexInputStateCreateInfo vertexInputState{
-    .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-    .vertexBindingDescriptionCount = 1,
-    .pVertexBindingDescriptions = &vertexBinding,
-    .vertexAttributeDescriptionCount = static_cast<uint32_t>(vertexAttributes.size()),
-    .pVertexAttributeDescriptions = vertexAttributes.data(),
-    };
-
-    VkPipelineInputAssemblyStateCreateInfo inputAssemblyState{ // defines how the primitives are assembled
-    .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
-    .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
-    };
-
-    std::vector<VkPipelineShaderStageCreateInfo> shaderStages{ // sets shaders. extracted from the slang shader module
-    {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-      .stage = VK_SHADER_STAGE_VERTEX_BIT,
-      .module = shaderModule, .pName = "main"},
-    {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-      .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
-      .module = shaderModule, .pName = "main" }
-    };
-
-    VkPipelineViewportStateCreateInfo viewportState{ // specify viewport and scizzorrect
-    .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
-    .viewportCount = 1,
-    .scissorCount = 1
-    };
-    std::vector<VkDynamicState> dynamicStates{ VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR }; // make them dynamic so we can change them without recompiling the pipelinestate
-    VkPipelineDynamicStateCreateInfo dynamicState{
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
-        .dynamicStateCount = 2,
-        .pDynamicStates = dynamicStates.data()
-    };
-
-    VkPipelineDepthStencilStateCreateInfo depthStencilState{ // depthstencil settings
-    .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
-    .depthTestEnable = VK_TRUE,
-    .depthWriteEnable = VK_TRUE,
-    .depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL
-    };
-
-    std::vector<VkFormat> imageFormats{ VK_FORMAT_B8G8R8A8_SRGB };
-    VkPipelineRenderingCreateInfo renderingCI{ // this tells the rendering pipeline that we are using "dynamic rendering"
-    .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
-    .colorAttachmentCount = (uint32_t)imageFormats.size(),
-    .pColorAttachmentFormats = imageFormats.data(),
-    .depthAttachmentFormat = RenderAPI::ToVK_ImageFormat(depthImage.Get().GetDesc().Format)
-    };
-
-    VkPipelineColorBlendAttachmentState blendAttachment{ // blend desc
-    .colorWriteMask = 0xF
-    };
-    VkPipelineColorBlendStateCreateInfo colorBlendState{
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
-        .attachmentCount = 1,
-        .pAttachments = &blendAttachment
-    };
-    VkPipelineRasterizationStateCreateInfo rasterizationState{ // raster desc
-         .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-         .lineWidth = 1.0f
-    };
-    VkPipelineMultisampleStateCreateInfo multisampleState{ // sample desc
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
-        .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT
-    };
-
-    VkGraphicsPipelineCreateInfo pipelineCI{
-    .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
-    .pNext = &renderingCI, // pass the VkPipelineRenderingCreateInfo as pNext since theres no dedicated member in the VkGraphicsPipelineCreateInfo struct (since dynamic rendering was added later)
-    .stageCount = 2,
-    .pStages = shaderStages.data(),
-    .pVertexInputState = &vertexInputState,
-    .pInputAssemblyState = &inputAssemblyState,
-    .pViewportState = &viewportState,
-    .pRasterizationState = &rasterizationState,
-    .pMultisampleState = &multisampleState,
-    .pDepthStencilState = &depthStencilState,
-    .pColorBlendState = &colorBlendState,
-    .pDynamicState = &dynamicState,
-    .layout = pipelineLayout
-    };
-    VkPipeline pipeline;
-
-    // VkPipelineCache can be used here to cache the result for future re-use. This can be saved and then loaded again between app runs.
-    aZero::RenderAPI::chkSucceed(vkCreateGraphicsPipelines(core.GetLogicalDevice(), VK_NULL_HANDLE, 1, &pipelineCI, nullptr, &pipeline));
+    Pipeline::RenderPass renderPass(core);
+    Pipeline::RenderPass::VertexPassDesc vpDesc;
+    vpDesc.Module = &module;
+    vpDesc.DepthDesc = Pipeline::RenderPass::VertexPassDesc::DepthStencil();
+    vpDesc.RenderTargetFormats = { VK_FORMAT_B8G8R8A8_SRGB };
+    Pipeline::RenderPass::VertexPassDesc::VertexBinding vBinding;
+    vBinding.AttributeFormats = { VK_FORMAT_R32G32B32_SFLOAT, VK_FORMAT_R32_UINT, VK_FORMAT_R32_UINT };
+    vBinding.InputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+    vBinding.Stride = sizeof(aZero::Asset::Vertex);
+    vpDesc.VertexBindings = { vBinding };
+    vpDesc.VS_EntryPoint = "main";
+    vpDesc.PS_EntryPoint = "main";
+    renderPass.CompileVertexPass(vpDesc);
 
     uint64_t lastTime{ SDL_GetTicks() };
     uint32_t frameIndex = 0;
@@ -496,59 +368,37 @@ int main()
         outputBarriers[1] = depthImage.Get().GetTransition();
 
         cb.Barrier({ outputBarriers[0], outputBarriers[1] });
-        
-        // DYNAMIC RENDERING
-        VkRenderingAttachmentInfo colorAttachmentInfo{ // specific to dynamic rendering
-            .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-            .imageView = swapchain.GetCurrentBackBufferView(),
-            .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
-            .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-            .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-            .clearValue{.color{ 0.0f, 0.0f, 0.2f, 1.0f }}
-        };
-        VkRenderingAttachmentInfo depthAttachmentInfo{ // specific to dynamic rendering
-            .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-            .imageView = depthImageView.Get(),
-            .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
-            .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-            .storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
-            .clearValue = {.depthStencil = {1.0f,  0}}
-        };
 
-        VkRenderingInfo renderingInfo{
-            .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
-            .renderArea{.extent{.width = static_cast<uint32_t>(window.GetClientDimensions()[0]), .height = static_cast<uint32_t>(window.GetClientDimensions()[1]) }},
-            .layerCount = 1,
-            .colorAttachmentCount = 1,
-            .pColorAttachments = &colorAttachmentInfo,
-            .pDepthAttachment = &depthAttachmentInfo
-        };
-        cb.BeginRender(renderingInfo);
-        //
+        {
+            renderPass.BeginRender(cb,
+                {
+                    .ColorTargets = {{.View = swapchain.GetCurrentBackBufferView() }},
+                    .DepthTarget = {.View = &depthImageView},
+                    .RenderWidth = static_cast<uint32_t>(window.GetClientDimensions()[0]),
+                    .RenderHeight = static_cast<uint32_t>(window.GetClientDimensions()[1]),
+                    .DescriptorSets = {&descriptorSet}
+                });
 
-        // since we made them dynamic when creating the pipeline we overwrite them here
-        VkViewport vp{
-            .width = static_cast<float>(window.GetClientDimensions()[0]),
-            .height = static_cast<float>(window.GetClientDimensions()[1]),
-            .minDepth = 0.0f,
-            .maxDepth = 1.0f
-        };
-        VkRect2D scissor{ .extent{.width = static_cast<uint32_t>(window.GetClientDimensions()[0]), .height = static_cast<uint32_t>(window.GetClientDimensions()[1]) } };
-        cb.SetScizzorRectsAndViewports({ vp }, { scissor });
+            // since we made them dynamic when creating the pipeline we overwrite them here
+            VkViewport vp{
+                .width = static_cast<float>(window.GetClientDimensions()[0]),
+                .height = static_cast<float>(window.GetClientDimensions()[1]),
+                .minDepth = 0.0f,
+                .maxDepth = 1.0f
+            };
+            VkRect2D scissor{ .extent{.width = static_cast<uint32_t>(window.GetClientDimensions()[0]), .height = static_cast<uint32_t>(window.GetClientDimensions()[1]) } };
+            cb.SetScizzorRectsAndViewports({ vp }, { scissor });
 
-        vkCmdBindPipeline(cb.Get(), VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
-        std::vector<VkDescriptorSet> descSets{ descriptorSet.Get() };
-        vkCmdBindDescriptorSets(cb.Get(), VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, (uint32_t)descSets.size(), descSets.data(), 0, nullptr);
-        
-        cb.SetVertexBuffer(vBuffer, 0);
-        cb.SetIndexBuffer(vBuffer, sizeof(aZero::Asset::Vertex) * meshData.Vertices.size());
-       
-        auto pushconst = shaderDataBuffers[frameIndex].GetDeviceAddress().value();
-        vkCmdPushConstants(cb.Get(), pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(VkDeviceAddress), &pushconst);
+            cb.SetVertexBuffer(vBuffer, 0);
+            cb.SetIndexBuffer(vBuffer, sizeof(aZero::Asset::Vertex) * meshData.Vertices.size());
 
-        cb.DrawIndexed((uint32_t)meshData.Indices.size(), 3, 0, 0, 0);
+            auto pushconst = shaderDataBuffers[frameIndex].GetDeviceAddress().value();
+            vkCmdPushConstants(cb.Get(), renderPass.GetPipelineLayout(), VK_SHADER_STAGE_ALL, 0, sizeof(VkDeviceAddress), &pushconst);
 
-        cb.EndRender();
+            cb.DrawIndexed((uint32_t)meshData.Indices.size(), 3, 0, 0, 0);
+
+            renderPass.EndRender(cb);
+        }
 
         swapchain.CompleteFrame(cb);
 

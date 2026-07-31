@@ -4,7 +4,19 @@ struct VSInput {
     uint UV;
 };
 
+[[vk::binding(0, 0)]]
 Sampler2D textures[];
+
+[[vk::binding(0, 1)]]
+SamplerState samplers[];
+
+struct PushConstants
+{
+    uint64_t address;
+};
+
+[[vk::push_constant]]
+ConstantBuffer<PushConstants> pc;
 
 struct ShaderData {
     float4x4 projection;
@@ -59,8 +71,9 @@ float2 Unpack32ToHalfFloats(uint p)
 }
 
 [shader("vertex")]
-VSOutput main(VSInput input, uniform ShaderData *shaderData, uint instanceIndex : SV_VulkanInstanceID) {
+VSOutput main(VSInput input, uint instanceIndex : SV_VulkanInstanceID) {
     VSOutput output;
+    ShaderData *shaderData = (ShaderData *)pc.address;
     float4x4 modelMat = shaderData->model[instanceIndex];
     output.Normal = normalize(mul((float3x3)modelMat, DecodeNormalOctahedral(UnpackOct16(Unpack32To16(input.Normal)))));
     output.UV = Unpack32ToHalfFloats(input.UV);
@@ -69,9 +82,9 @@ VSOutput main(VSInput input, uniform ShaderData *shaderData, uint instanceIndex 
     return output;
 }
 
-[shader("fragment")]
-float4 main(VSOutput input) {
-    return float4(textures[0].Sample(input.UV).rgb, 1.0);
-    //return float4((input.Normal + 1) * 0.5, 1.0);
-    //return float4(input.UV, 0.0, 1.0);
-}
+//[shader("fragment")]
+//float4 main(VSOutput input) {
+//    return float4(textures[0].Sample(input.UV).rgb, 1.0);
+//    //return float4((input.Normal + 1) * 0.5, 1.0);
+//    //return float4(input.UV, 0.0, 1.0);
+//}

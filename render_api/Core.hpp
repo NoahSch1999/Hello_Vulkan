@@ -169,6 +169,7 @@ namespace aZero::RenderAPI
 			};
 			VkPhysicalDeviceFeatures enabledVk10Features{
 				.samplerAnisotropy = VK_TRUE,
+				.shaderInt64 = VK_TRUE,
 				.shaderInt16 = VK_TRUE, // enables int16 in shaders
 			};
 
