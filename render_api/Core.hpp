@@ -74,6 +74,9 @@ namespace aZero::RenderAPI
 
 		VmaAllocator m_VmaAllocator;
 
+
+		const char* const ValidationLayerSL = "VK_LAYER_KHRONOS_validation";
+
 		void InitAppInstance(const Desc& desc)
 		{
 			volkInitialize();
@@ -102,8 +105,8 @@ namespace aZero::RenderAPI
 			};
 
 			std::vector<const char*> layers;
-
-			if (desc.EnableValidationLayer) {
+			if (this->CheckValidationLayerSupport())
+			{
 				layers.push_back("VK_LAYER_KHRONOS_validation");
 			}
 
@@ -231,6 +234,25 @@ namespace aZero::RenderAPI
 			};
 
 			chkSucceed(vmaCreateAllocator(&allocatorCI, &m_VmaAllocator));
+		}
+
+		bool CheckValidationLayerSupport()
+		{
+			uint32_t layerCount = 0;
+			vkEnumerateInstanceLayerProperties(&layerCount, nullptr);
+
+			std::vector<VkLayerProperties> availableLayers(layerCount);
+			vkEnumerateInstanceLayerProperties(&layerCount, availableLayers.data());
+			
+			for (auto layer : availableLayers)
+			{
+				if (strcmp(ValidationLayerSL, layer.layerName) == 0)
+				{
+					return true;
+				}
+			}
+
+			return false;
 		}
 	};
 }

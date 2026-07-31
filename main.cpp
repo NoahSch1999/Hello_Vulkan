@@ -369,36 +369,35 @@ int main()
 
         cb.Barrier({ outputBarriers[0], outputBarriers[1] });
 
-        {
-            renderPass.BeginRender(cb,
-                {
-                    .ColorTargets = {{.View = swapchain.GetCurrentBackBufferView() }},
-                    .DepthTarget = {.View = &depthImageView},
-                    .RenderWidth = static_cast<uint32_t>(window.GetClientDimensions()[0]),
-                    .RenderHeight = static_cast<uint32_t>(window.GetClientDimensions()[1]),
-                    .DescriptorSets = {&descriptorSet}
-                });
+        renderPass.Render(
+            cb,
+            {
+                .ColorTargets = {{.View = swapchain.GetCurrentBackBufferView() }},
+                .DepthTarget = {.View = &depthImageView},
+                .RenderWidth = static_cast<uint32_t>(window.GetClientDimensions()[0]),
+                .RenderHeight = static_cast<uint32_t>(window.GetClientDimensions()[1]),
+                .DescriptorSets = {&descriptorSet},
+                .Callback = [&window, &vBuffer, &shaderDataBuffers, &frameIndex](RenderAPI::CommandBuffer& cb, Pipeline::RenderPass& pass) {
+                    // since we made them dynamic when creating the pipeline we overwrite them here
+                    VkViewport vp{
+                        .width = static_cast<float>(window.GetClientDimensions()[0]),
+                        .height = static_cast<float>(window.GetClientDimensions()[1]),
+                        .minDepth = 0.0f,
+                        .maxDepth = 1.0f
+                    };
+                    VkRect2D scissor{.extent{.width = static_cast<uint32_t>(window.GetClientDimensions()[0]), .height = static_cast<uint32_t>(window.GetClientDimensions()[1]) } };
+                    cb.SetScizzorRectsAndViewports({ vp }, { scissor });
 
-            // since we made them dynamic when creating the pipeline we overwrite them here
-            VkViewport vp{
-                .width = static_cast<float>(window.GetClientDimensions()[0]),
-                .height = static_cast<float>(window.GetClientDimensions()[1]),
-                .minDepth = 0.0f,
-                .maxDepth = 1.0f
-            };
-            VkRect2D scissor{ .extent{.width = static_cast<uint32_t>(window.GetClientDimensions()[0]), .height = static_cast<uint32_t>(window.GetClientDimensions()[1]) } };
-            cb.SetScizzorRectsAndViewports({ vp }, { scissor });
+                    cb.SetVertexBuffer(vBuffer, 0);
+                    cb.SetIndexBuffer(vBuffer, sizeof(aZero::Asset::Vertex) * meshData.Vertices.size());
 
-            cb.SetVertexBuffer(vBuffer, 0);
-            cb.SetIndexBuffer(vBuffer, sizeof(aZero::Asset::Vertex) * meshData.Vertices.size());
+                    auto pushconst = shaderDataBuffers[frameIndex].GetDeviceAddress().value();
+                    vkCmdPushConstants(cb.Get(), pass.GetPipelineLayout(), VK_SHADER_STAGE_ALL, 0, sizeof(VkDeviceAddress), &pushconst);
 
-            auto pushconst = shaderDataBuffers[frameIndex].GetDeviceAddress().value();
-            vkCmdPushConstants(cb.Get(), renderPass.GetPipelineLayout(), VK_SHADER_STAGE_ALL, 0, sizeof(VkDeviceAddress), &pushconst);
-
-            cb.DrawIndexed((uint32_t)meshData.Indices.size(), 3, 0, 0, 0);
-
-            renderPass.EndRender(cb);
-        }
+                    cb.DrawIndexed((uint32_t)meshData.Indices.size(), 3, 0, 0, 0);
+                }
+            }
+        );
 
         swapchain.CompleteFrame(cb);
 

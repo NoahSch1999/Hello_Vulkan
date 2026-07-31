@@ -1,6 +1,5 @@
 cmake_minimum_required(VERSION 3.20 FATAL_ERROR)
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake")
-include(FetchContent)
 set(NAME HowToVulkan)
 project(${NAME})
 
@@ -10,20 +9,22 @@ set(CMAKE_CXX_STANDARD_REQUIRED True)
 include(FetchContent)
 
 # Vulkan
-FetchContent_Declare(VulkanHeaders
+FetchContent_Declare(Vulkan_Headers
     GIT_REPOSITORY https://github.com/KhronosGroup/Vulkan-Headers.git
-    GIT_TAG "vulkan-sdk-1.4.350"
+    GIT_TAG "vulkan-sdk-1.4.350.0"
     GIT_SHALLOW TRUE
 )
-FetchContent_MakeAvailable(VulkanHeaders)
+
+FetchContent_MakeAvailable(Vulkan_Headers)
 #
 
 # Volk
 FetchContent_Declare(Volk
     GIT_REPOSITORY https://github.com/zeux/volk.git
-    GIT_TAG "vulkan-sdk-1.4.350"
+    GIT_TAG "1.4.350"
     GIT_SHALLOW TRUE
 )
+set(VULKAN_HEADERS_INSTALL_DIR "${vulkan_headers_SOURCE_DIR}" CACHE PATH "Where to get the Vulkan headers" FORCE)
 FetchContent_MakeAvailable(Volk)
 #
 
@@ -87,6 +88,7 @@ FetchContent_MakeAvailable(meshoptimizer)
 FetchContent_Declare(
     slang
     GIT_REPOSITORY https://github.com/shader-slang/slang.git
+    #GIT_TAG "vulkan-sdk-1.4.350.0"
     GIT_TAG "v2026.13"
     GIT_SHALLOW TRUE
 )
@@ -98,6 +100,18 @@ set(SLANG_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
 set(SLANG_ENABLE_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(SLANG_ENABLE_OPTIX OFF CACHE BOOL "" FORCE)
 set(SLANG_ENABLE_CUDA OFF CACHE BOOL "" FORCE)
+set(SLANG_ENABLE_DXIL OFF CACHE BOOL "" FORCE)
+set(SLANG_ENABLE_COVERAGE OFF CACHE BOOL "" FORCE)
+set(SLANG_ENABLE_TIME_TRACE OFF CACHE BOOL "" FORCE)
+set(SLANG_ENABLE_SLANG_GLSLANG OFF CACHE BOOL "" FORCE)
+set(SLANG_ENABLE_SLANG_PROXY OFF CACHE BOOL "" FORCE)
+set(SLANG_ENABLE_REPLAYER OFF CACHE BOOL "" FORCE)
+set(SLANG_EXCLUDE_DAWN ON CACHE BOOL "" FORCE)
+set(SLANG_LIB_TYPE STATIC CACHE STRING "" FORCE)
+
+set(SLANG_ENABLE_MINIZ ON CACHE BOOL "" FORCE)
+set(SLANG_USE_SYSTEM_MINIZ OFF CACHE BOOL "" FORCE)
+set(SLANG_STATIC ON CACHE BOOL "" FORCE)
 
 FetchContent_MakeAvailable(slang)
 #
@@ -114,7 +128,7 @@ FetchContent_MakeAvailable(aZeroWindow)
 
 add_executable(${NAME} "main.cpp" "Loading_Assets/STBIHack.cpp")
 
-target_compile_definitions(${NAME} PRIVATE
+target_compile_definitions(${NAME} PUBLIC
     VK_NO_PROTOTYPES
     VK_USE_PLATFORM_WIN32_KHR
     NOMINMAX
@@ -124,6 +138,7 @@ target_compile_definitions(${NAME} PRIVATE
 
 target_link_libraries(${NAME} 
     PUBLIC
+    Vulkan::Headers
     volk::volk
     GPUOpen::VulkanMemoryAllocator
     ktx

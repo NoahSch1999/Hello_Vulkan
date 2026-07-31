@@ -1,6 +1,6 @@
 #pragma once
 #include "slang.h"
-#include "slang/slang-com-ptr.h"
+#include "slang-com-ptr.h"
 #include "Core.hpp"
 
 
@@ -145,7 +145,9 @@ namespace aZero::Compiler
             }
 
             Slang::ComPtr<slang::IBlob> diagnostics;
-            Slang::ComPtr<slang::IModule> module{ m_Session->loadModuleFromSource(path.stem().generic_string().c_str(), path.generic_string().c_str(), nullptr, diagnostics.writeRef())};
+            //Slang::ComPtr<slang::IModule> module{ m_Session->loadModuleFromSource(path.stem().generic_string().c_str(), path.generic_string().c_str(), nullptr, diagnostics.writeRef())};
+
+            Slang::ComPtr<slang::IModule> module{ m_Session->loadModule(path.generic_string().c_str(), diagnostics.writeRef()) };
 
             if (diagnostics)
             {

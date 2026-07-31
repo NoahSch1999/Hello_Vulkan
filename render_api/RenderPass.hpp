@@ -4,7 +4,12 @@
 
 namespace aZero::Pipeline
 {
+    class RenderPass;
+
     enum class ERenderPassType { Graphics, Compute };
+    
+    using RenderCallback = std::function<void(RenderAPI::CommandBuffer&, aZero::Pipeline::RenderPass&)>;
+
     /*
         NOTE!
         Currently only supports one binding per set.
@@ -57,9 +62,11 @@ namespace aZero::Pipeline
             uint32_t RenderWidth = 0u, RenderHeight = 0u;
 
             std::vector<RenderAPI::DescriptorSet*> DescriptorSets;
+
+            RenderCallback Callback;
         };
 
-        bool BeginRender(RenderAPI::CommandBuffer& commandBuffer, const RenderDesc& renderDesc)
+        bool Render(RenderAPI::CommandBuffer& commandBuffer, const RenderDesc& renderDesc)
         {
             if (m_Type != ERenderPassType::Graphics)
             {
@@ -135,12 +142,11 @@ namespace aZero::Pipeline
             }
             vkCmdBindDescriptorSets(commandBuffer.Get(), VK_PIPELINE_BIND_POINT_GRAPHICS, m_Layout, 0, (uint32_t)descSets.size(), descSets.data(), 0, nullptr);
 
-            return true;
-        }
+            renderDesc.Callback(commandBuffer, *this);
 
-        void EndRender(RenderAPI::CommandBuffer& commandBuffer)
-        {
             commandBuffer.EndRender();
+
+            return true;
         }
 
         struct Desc
