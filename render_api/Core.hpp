@@ -62,6 +62,7 @@ namespace aZero::RenderAPI
 		VkPhysicalDevice GetPhysicalDevice() const { return m_PhysicalDevice; }
 		VkDevice GetLogicalDevice() const { return m_Device; }
 		VmaAllocator GetVmaAllocator() const { return m_VmaAllocator; }
+		uint32_t GetVariadicDescriptorCount() const { return m_VariadicDescriptorCount; }
 
 	private:
 		VkInstance m_Instance;
@@ -73,7 +74,7 @@ namespace aZero::RenderAPI
 		uint32_t m_CopyQueueIndex;
 
 		VmaAllocator m_VmaAllocator;
-
+		uint32_t m_VariadicDescriptorCount = 1024u;
 
 		const char* const ValidationLayerSL = "VK_LAYER_KHRONOS_validation";
 

@@ -17,21 +17,16 @@ namespace aZero::Pipeline
     class RenderPass
     {
     public:
-        struct Binding
+        struct PushConstantBinding
         {
-            std::size_t Binding;
-            std::size_t Space;
-            std::size_t Stride;
-            std::size_t DescriptorCount;
-            slang::TypeReflection::Kind Kind;
-            slang::ParameterCategory Category;
-            slang::BindingType Type;
+            VkShaderStageFlags StageFlags;
+            uint32_t Offset;
+            uint32_t Size;
         };
 
         struct Reflection
         {
-            std::unordered_map<SlangStage, std::string> EntryPoints;
-            std::unordered_map<std::string, Binding> Bindings;
+            std::unordered_map<std::string, PushConstantBinding> PushConstants;
         };
 
         RenderPass() = default;
@@ -189,8 +184,7 @@ namespace aZero::Pipeline
             std::vector<VkFormat> RenderTargetFormats;
             std::optional<DepthStencil> DepthDesc;
             Rasterizer RasterDesc;
-            Compiler::ShaderModule* Module = nullptr;
-            std::string PS_EntryPoint;
+            Compiler::ShaderProgram* Program = nullptr;
         };
 
         struct VertexPassDesc : public Desc
@@ -207,7 +201,6 @@ namespace aZero::Pipeline
                 //};
             };
             std::vector<VertexBinding> VertexBindings;
-            std::string VS_EntryPoint;
         };
 
         bool CompileVertexPass(const VertexPassDesc& desc)
@@ -217,34 +210,21 @@ namespace aZero::Pipeline
                 return false;
             }
 
-            if (!desc.Module) {
-                std::cout << "No module input.\n";
+            if (!desc.Program) {
+                std::cout << "No program input.\n";
                 return false;
             }
 
-            this->LinkAndReflect(*desc.Module, desc);
-
-            if (!m_Reflection.EntryPoints.contains(SlangStage::SLANG_STAGE_VERTEX))
-            {
-                std::cout << "No vertex shader entry found in the module.\n";
-                return false;
-            }
-
-            if (desc.VertexBindings.empty())
-            {
-                std::cout << "No vertex buffer binding in the pass description.\n";
-                return false;
-            }
-
+            const Compiler::ShaderProgram::Reflection& reflection = desc.Program->GetReflection();
             std::vector<VkPipelineShaderStageCreateInfo> shaderStages;
 
-            for (const auto& [stageType, entryPoint] : m_Reflection.EntryPoints)
+            for (const auto& [stageName, moduleInfo] : reflection.Modules)
             {
                 VkPipelineShaderStageCreateInfo stageCI{
                     .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-                    .stage = Compiler::SlangStageToVkStage(stageType),
-                    .module = desc.Module->Get(),
-                    .pName = entryPoint.c_str()
+                    .stage = moduleInfo.Stage,
+                    .module = moduleInfo.VkModule,
+                    .pName = moduleInfo.Name.c_str()
                 };
                 shaderStages.push_back(stageCI);
             }
@@ -279,20 +259,10 @@ namespace aZero::Pipeline
             };
             //
 
-            // -------------------------
-            // VERTEX
-
-            {
-                auto slangModule = desc.Module->GetSlangModule();
-                slang::ProgramLayout* layout = slangModule->getLayout();
-                slang::VariableLayoutReflection* globals = layout->getGlobalParamsVarLayout();
-                slang::TypeLayoutReflection* typeLayout = globals->getTypeLayout();
-            }
-
             std::vector<VkVertexInputAttributeDescription> vertexAttributes;
 
             std::vector<VkVertexInputBindingDescription> vertexBindings(desc.VertexBindings.size());
-            for(uint32_t i = 0; i < vertexBindings.size(); i++)
+            for (uint32_t i = 0; i < vertexBindings.size(); i++)
             {
                 vertexBindings[i] = {
                     .binding = i,
@@ -311,7 +281,7 @@ namespace aZero::Pipeline
                     };
 
                     localAttributeOffset += aZero::RenderAPI::GetFormatStride(desc.VertexBindings[i].AttributeFormats[j]);
-                    
+
                     vertexAttributes.push_back(attribute);
                 }
             };
@@ -348,70 +318,30 @@ namespace aZero::Pipeline
                 m_HasDepthStencilTarget = true;
             }
 
-            std::vector<VkPushConstantRange> pushConstants;
-            std::vector<VkDescriptorSetLayout> descLayouts;
-
-            for (const auto& [bindingName, bindingInfo] : m_Reflection.Bindings)
+            std::vector<VkDescriptorSetLayout> layouts;
+            for (const auto& [setIndex, set] : reflection.DescriptorSets)
             {
-                if (bindingInfo.Type == slang::BindingType::PushConstant)
-                {
-                    VkPushConstantRange pushConstant{
-                        .stageFlags = VkShaderStageFlagBits::VK_SHADER_STAGE_ALL,
-                        .size = (uint32_t)bindingInfo.Stride
-                    };
-                    pushConstants.push_back(pushConstant);
-                }
-                else if (bindingInfo.Type == slang::BindingType::CombinedTextureSampler || bindingInfo.Type == slang::BindingType::Sampler || bindingInfo.Type == slang::BindingType::Texture)
-                {
+                layouts.push_back(set.Layout);
+            }
 
-                    VkDescriptorBindingFlags descVariableFlag;
-                    VkDescriptorSetLayoutBindingFlagsCreateInfo descBindingFlags{
-                        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO,
-                    };
-
-                    VkDescriptorSetLayoutBinding layoutBinding{
-                        .binding = (uint32_t)bindingInfo.Binding,
-                        .descriptorType = Compiler::SlangBindingTypeToVkDescriptorType(bindingInfo.Type),
-                        .stageFlags = VkShaderStageFlagBits::VK_SHADER_STAGE_ALL,
-                    };
-
-                    VkDescriptorSetLayoutCreateInfo descLayoutTexCI{
-                        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-                        .pBindings = &layoutBinding
-                    };
-
-                    if (bindingInfo.DescriptorCount == SLANG_UNBOUNDED_SIZE)
-                    {
-                        layoutBinding.descriptorCount = 1024; // todo Not hardcode this...
-                        descVariableFlag = VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT;
-
-                        descBindingFlags.bindingCount = 1u;
-                        descBindingFlags.pBindingFlags = &descVariableFlag;
-
-                        descLayoutTexCI.pNext = &descBindingFlags;
-                        descLayoutTexCI.bindingCount = 1u;
-                    }
-                    else
-                    {
-                        layoutBinding.descriptorCount = uint32_t(bindingInfo.DescriptorCount);
-                    }
-
-                    VkDescriptorSetLayout layout;
-                    aZero::RenderAPI::chkSucceed(vkCreateDescriptorSetLayout(m_diCore->GetLogicalDevice(), &descLayoutTexCI, nullptr, &layout));
-                    descLayouts.push_back(layout);
-                }
+            std::vector<VkPushConstantRange> pcRanges;
+            for (const auto& [offset, constant] : reflection.PushConstants)
+            {
+                pcRanges.push_back(constant.Range);
             }
 
             VkPipelineLayoutCreateInfo pipelineLayoutCI{
                 .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-                .setLayoutCount = (uint32_t)descLayouts.size(),
-                .pSetLayouts = descLayouts.data(),
-                .pushConstantRangeCount = (uint32_t)pushConstants.size(),
-                .pPushConstantRanges = pushConstants.data()
+                .setLayoutCount = (uint32_t)layouts.size(),
+                .pSetLayouts = layouts.data(),
+                .pushConstantRangeCount = (uint32_t)pcRanges.size(),
+                .pPushConstantRanges = pcRanges.data()
             };
 
-            aZero::RenderAPI::chkSucceed(vkCreatePipelineLayout(m_diCore->GetLogicalDevice(), &pipelineLayoutCI, nullptr, &m_Layout));
-
+            if (!aZero::RenderAPI::chkSucceed(vkCreatePipelineLayout(m_diCore->GetLogicalDevice(), &pipelineLayoutCI, nullptr, &m_Layout)))
+            {
+                return false;
+            }
 
             VkGraphicsPipelineCreateInfo pipelineCI{
                 .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
@@ -435,100 +365,25 @@ namespace aZero::Pipeline
                 return false;
             }
 
+            this->PopulateReflection(desc.Program->GetReflection());
             m_Type = ERenderPassType::Graphics;
-
-            return true;
         }
 
         VkPipeline GetPipeline() const { return m_Pipeline; }
         VkPipelineLayout GetPipelineLayout() const { return m_Layout; }
+        const Reflection& GetReflection() const { return m_Reflection; }
 
     private:
-        bool LinkAndReflect(Compiler::ShaderModule& module, const VertexPassDesc& desc)
+        void PopulateReflection(const Compiler::ShaderProgram::Reflection& reflection)
         {
-            auto slangModule = module.GetSlangModule();
-
-            Slang::ComPtr<slang::IEntryPoint> vsEntry;
-            slangModule->findEntryPointByName(desc.VS_EntryPoint.c_str(), vsEntry.writeRef());
-            if (!vsEntry.get())
+            for (const auto& [offset, pconstant] : reflection.PushConstants)
             {
-                printf("No vertex shader entry point found: %s", desc.VS_EntryPoint.c_str());
-                return false;
+                m_Reflection.PushConstants[pconstant.Name] = {
+                    .StageFlags = pconstant.Range.stageFlags,
+                    .Offset = offset,
+                    .Size = pconstant.Range.size
+                };
             }
-            m_Reflection.EntryPoints[SlangStage::SLANG_STAGE_VERTEX] = desc.VS_EntryPoint;
-
-            std::vector<slang::IComponentType*> components;
-            components.push_back(slangModule);
-            components.push_back(vsEntry);
-
-            if (!desc.PS_EntryPoint.empty())
-            {
-                Slang::ComPtr<slang::IEntryPoint> psEntry;
-                slangModule->findEntryPointByName(desc.PS_EntryPoint.c_str(), psEntry.writeRef());
-                if (!psEntry.get())
-                {
-                    printf("No pixel shader entry point found: %s", desc.PS_EntryPoint.c_str());
-                    return false;
-                }
-                m_Reflection.EntryPoints[SlangStage::SLANG_STAGE_FRAGMENT] = desc.PS_EntryPoint;
-                components.push_back(psEntry);
-            }
-
-            Slang::ComPtr<slang::IComponentType> program;
-            Slang::ComPtr<slang::IBlob> diagnostics;
-            if (SLANG_FAILED(module.GetSession()->createCompositeComponentType(
-                components.data(),
-                components.size(),
-                program.writeRef(),
-                diagnostics.writeRef()))) 
-            {
-                if (diagnostics)
-                {
-                    std::cerr << static_cast<const char*>(diagnostics->getBufferPointer()) << std::endl;
-                }
-                return false;
-            }
-
-            // 4. Link
-            Slang::ComPtr<slang::IComponentType> linkedProgram;
-            if (SLANG_FAILED(program->link(linkedProgram.writeRef(), diagnostics.writeRef())))
-            {
-                if (diagnostics)
-                {
-                    std::cerr << static_cast<const char*>(diagnostics->getBufferPointer()) << std::endl;
-                }
-                return false;
-            }
-
-            this->Reflect(module, linkedProgram);
-
-            return true;
-        }
-
-        void Reflect(Compiler::ShaderModule& module, Slang::ComPtr<slang::IComponentType> linkedProgram)
-        {
-            slang::ProgramLayout* layout = linkedProgram->getLayout();
-            slang::VariableLayoutReflection* globals = layout->getGlobalParamsVarLayout();
-            slang::TypeLayoutReflection* typeLayout = globals->getTypeLayout();
-
-            std::unordered_map<std::string, Binding> bindings;
-
-            for (int i = 0; i < typeLayout->getFieldCount(); i++)
-            {
-                slang::VariableLayoutReflection* field = typeLayout->getFieldByIndex(i);
-
-                Binding reflectedField;
-                reflectedField.Binding = field->getOffset(slang::ParameterCategory::DescriptorTableSlot);
-                reflectedField.Space = field->getOffset(slang::ParameterCategory::RegisterSpace);
-                reflectedField.Kind = field->getType()->getKind();
-                reflectedField.Category = field->getCategory();
-                reflectedField.Type = typeLayout->getBindingRangeType(i);
-                reflectedField.DescriptorCount = typeLayout->getBindingRangeBindingCount(i);
-                reflectedField.Stride = field->getTypeLayout()->getElementTypeLayout()->getSize(slang::ParameterCategory::Uniform);
-                bindings[field->getName()] = reflectedField;
-            }
-
-            m_Reflection.Bindings = std::move(bindings);
         }
 
         ERenderPassType m_Type;

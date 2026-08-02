@@ -2,7 +2,8 @@
 #include "slang.h"
 #include "slang-com-ptr.h"
 #include "Core.hpp"
-
+#include "spirv_reflect.h"
+#include <unordered_set>
 
 /*
     auto slangOptions = std::to_array<slang::CompilerOptionEntry>({
@@ -87,11 +88,54 @@ namespace aZero::Compiler
         return VkDescriptorType::VK_DESCRIPTOR_TYPE_MAX_ENUM;
     }
 
+    VkDescriptorType SpirvBindingTypeToVkDescriptorType(SpvReflectDescriptorType type)
+    {
+        switch (type)
+        {
+        case SpvReflectDescriptorType::SPV_REFLECT_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:
+        {
+            return VkDescriptorType::VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        }
+        case SpvReflectDescriptorType::SPV_REFLECT_DESCRIPTOR_TYPE_STORAGE_BUFFER:
+        {
+            return VkDescriptorType::VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        }
+        case SpvReflectDescriptorType::SPV_REFLECT_DESCRIPTOR_TYPE_STORAGE_IMAGE:
+        {
+            return VkDescriptorType::VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        }
+        case SpvReflectDescriptorType::SPV_REFLECT_DESCRIPTOR_TYPE_SAMPLER:
+        {
+            return VkDescriptorType::VK_DESCRIPTOR_TYPE_SAMPLER;
+        }
+        case SpvReflectDescriptorType::SPV_REFLECT_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
+        {
+            return VkDescriptorType::VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        }
+        default:
+        {
+            throw std::runtime_error("Binding type not supported.");
+        }
+        }
+        return VkDescriptorType::VK_DESCRIPTOR_TYPE_MAX_ENUM;
+    }
+
+    struct ShaderBinding
+    {
+        std::size_t Binding;
+        std::size_t Space;
+        std::size_t Stride;
+        std::size_t DescriptorCount;
+        slang::TypeReflection::Kind Kind;
+        slang::ParameterCategory Category;
+        slang::BindingType Type;
+    };
+
     class ShaderModule
     {
+        friend class ShaderProgram;
         friend class CompilerSession;
     public:
-       
 
         ShaderModule() = default;
         VkShaderModule Get() const { return m_ShaderModule; }
@@ -99,7 +143,7 @@ namespace aZero::Compiler
         slang::ISession* GetSession() const { return m_Session.get(); }
 
     private:
-        ShaderModule(Slang::ComPtr<slang::IModule> module, Slang::ComPtr<slang::ISession> session, RenderAPI::Core& core)
+        ShaderModule(Slang::ComPtr<slang::IModule> module, Slang::ComPtr<slang::ISession> session, RenderAPI::Core& core)// todo REMOVE
             :m_SlangModule(module), m_Session(session), m_diCore(&core)
         {
             Slang::ComPtr<ISlangBlob> spirv;
@@ -116,8 +160,311 @@ namespace aZero::Compiler
        
         Slang::ComPtr<slang::IModule> m_SlangModule;
         Slang::ComPtr<slang::ISession> m_Session;
-        VkShaderModule m_ShaderModule;
+        VkShaderModule m_ShaderModule; // todo REMOVE
         RenderAPI::Core* m_diCore = nullptr;
+    };
+
+    class ShaderProgram
+    {
+    public:
+        struct PushConstantReflection
+        {
+            std::string Name;
+            VkPushConstantRange Range;
+        };
+
+        struct DescriptorSetReflection
+        {
+            struct LayoutBinding
+            {
+                std::string Name;
+                bool HasVariableBinding = false;
+                VkDescriptorSetLayoutBinding VkLayout;
+            };
+
+            VkDescriptorSetLayout Layout;
+            std::unordered_map<uint32_t, LayoutBinding> LayoutBindings;
+        };
+
+        struct ModuleReflection
+        {
+            std::string Name;
+            VkShaderModule VkModule;
+            VkShaderStageFlagBits Stage;
+        };
+
+        struct Reflection
+        {
+            std::unordered_map<std::string, ModuleReflection> Modules;
+            std::unordered_map<uint32_t, PushConstantReflection> PushConstants;
+            std::unordered_map<uint32_t, DescriptorSetReflection> DescriptorSets;
+        };
+
+        struct VertexDesc
+        {
+            std::unordered_set<std::string> EntryPoints;
+            std::vector<ShaderModule*> Modules;
+        };
+
+        struct MeshletDesc
+        {
+            std::unordered_set<std::string> EntryPoints;
+            std::vector<ShaderModule*> Modules;
+        };
+
+        struct ComputeDesc
+        {
+            std::string EntryPointName;
+            std::vector<ShaderModule*> Modules;
+        };
+
+        using Desc = std::variant<VertexDesc, MeshletDesc, ComputeDesc>;
+
+        ShaderProgram() = default;
+
+        ShaderProgram(const Desc& desc)
+        {
+            std::visit([this](auto&& programDesc)
+            {
+                Build(programDesc);
+            }, desc);
+        }
+
+        template<typename T>
+        bool Build(const T& desc)
+        {
+            if (desc.Modules.empty())
+            {
+                printf("No modules input.\n");
+                return false;
+            }
+
+            std::vector<slang::IComponentType*> programComponents;
+            for (const ShaderModule* module : desc.Modules)
+            {
+                programComponents.push_back(module->GetSlangModule());
+            }
+
+            this->AddEntryPoints(desc, programComponents);
+
+            Slang::ComPtr<slang::IComponentType> builtProgram = this->BuildProgram(desc.Modules, programComponents);
+            if (!builtProgram.get())
+            {
+                return false;
+            }
+
+            m_Program = builtProgram;
+            m_Desc = desc;
+
+            return true;
+        }
+
+        const Reflection& GetReflection() const { return m_Reflection; }
+
+    private:
+        Slang::ComPtr<slang::IComponentType> m_Program;
+        Desc m_Desc;
+        Reflection m_Reflection;
+
+        void AddEntryPoints(const MeshletDesc& desc, std::vector<slang::IComponentType*>& programComponents)
+        {
+            this->FindAddEntryPoints(programComponents, desc.EntryPoints, desc.Modules);
+        }
+
+        void AddEntryPoints(const VertexDesc& desc, std::vector<slang::IComponentType*>& programComponents)
+        {
+            this->FindAddEntryPoints(programComponents, desc.EntryPoints, desc.Modules);
+        }
+
+        void AddEntryPoints(const ComputeDesc& desc, std::vector<slang::IComponentType*>& programComponents)
+        {
+            this->FindAddEntryPoints(programComponents, { desc.EntryPointName }, desc.Modules);
+        }
+
+        void FindAddEntryPoints(std::vector<slang::IComponentType*>& programComponents, const std::unordered_set<std::string>& entryPoints, const std::vector<ShaderModule*>& modules)
+        {
+            for (const auto& module : modules)
+            {
+                for (const auto& entryPoint : entryPoints)
+                {
+                    Slang::ComPtr<slang::IEntryPoint> entry;
+                    module->GetSlangModule()->findEntryPointByName(entryPoint.c_str(), entry.writeRef());
+                    if (entry.get())
+                    {
+                        programComponents.push_back(entry);
+                    }
+                }
+            }
+        }
+
+        Slang::ComPtr<slang::IComponentType> BuildProgram(const std::vector<ShaderModule*>& modules, const std::vector<slang::IComponentType*>& programComponents)
+        {
+            Slang::ComPtr<slang::IComponentType> compiledProgram;
+            Slang::ComPtr<slang::IBlob> diagnostics;
+            if (SLANG_FAILED(modules[0]->GetSession()->createCompositeComponentType(
+                programComponents.data(),
+                programComponents.size(),
+                compiledProgram.writeRef(),
+                diagnostics.writeRef())))
+            {
+                if (diagnostics)
+                {
+                    std::cerr << static_cast<const char*>(diagnostics->getBufferPointer()) << std::endl;
+                }
+                return nullptr;
+            }
+
+            Slang::ComPtr<slang::IComponentType> linkedProgram;
+            if (SLANG_FAILED(compiledProgram->link(linkedProgram.writeRef(), diagnostics.writeRef())))
+            {
+                if (diagnostics)
+                {
+                    std::cerr << static_cast<const char*>(diagnostics->getBufferPointer()) << std::endl;
+                }
+                return nullptr;
+            }
+
+            std::unordered_map<uint32_t, PushConstantReflection> pcRefl;
+            std::unordered_map<uint32_t, DescriptorSetReflection> dsRefl;
+            std::unordered_map<std::string, ModuleReflection> modulesRefl;
+
+            Slang::ComPtr<slang::IBlob> spirvCode;
+            for (uint32_t i = 0; i < linkedProgram->getLayout()->getEntryPointCount(); i++)
+            {
+                if (SLANG_FAILED(linkedProgram->getEntryPointCode(i, 0 /* spirv set during session creation */, spirvCode.writeRef(), diagnostics.writeRef())))
+                {
+                    if (diagnostics)
+                    {
+                        std::cerr << static_cast<const char*>(diagnostics->getBufferPointer()) << std::endl;
+                    }
+                    return nullptr;
+                }
+
+                slang::EntryPointReflection* entryPoint = linkedProgram->getLayout()->getEntryPointByIndex(i);
+                spv_reflect::ShaderModule sprvReflection(spirvCode->getBufferSize(), spirvCode->getBufferPointer());
+                SpvReflectShaderModule reflModule = sprvReflection.GetShaderModule();
+
+                for (uint32_t j = 0; j < reflModule.push_constant_block_count; j++)
+                {
+                    const SpvReflectBlockVariable& block = reflModule.push_constant_blocks[j];
+                    if (!pcRefl.contains(block.offset))
+                    {
+                        PushConstantReflection rangeRefl{
+                            .Name = std::string(block.name),
+                            .Range {
+                               .offset = block.offset,
+                               .size = block.size,
+                            }
+                        };
+                        pcRefl[block.offset] = rangeRefl;
+                    }
+
+                    pcRefl[block.offset].Range.stageFlags |= SlangStageToVkStage(entryPoint->getStage());
+                }
+
+                for (uint32_t j = 0; j < reflModule.descriptor_set_count; j++)
+                {
+                    const SpvReflectDescriptorSet& set = reflModule.descriptor_sets[j];
+
+                    for (uint32_t k = 0; k < set.binding_count; k++)
+                    {
+                        const SpvReflectDescriptorBinding& binding = *set.bindings[k];
+                        if (!dsRefl[set.set].LayoutBindings.contains(binding.binding))
+                        {
+                            // todo Add binding
+                            VkDescriptorSetLayoutBinding vkBinding{
+                                .binding = binding.binding,
+                                .descriptorType = SpirvBindingTypeToVkDescriptorType(binding.descriptor_type),
+                                .descriptorCount = binding.count
+                            };
+
+                            dsRefl[set.set].LayoutBindings[binding.binding].Name = binding.name;
+                            dsRefl[set.set].LayoutBindings[binding.binding].VkLayout = vkBinding;
+                        }
+
+                        dsRefl[set.set].LayoutBindings[binding.binding].VkLayout.stageFlags |= SlangStageToVkStage(entryPoint->getStage());
+                    }
+                }
+
+                VkShaderModuleCreateInfo shaderModuleCI{
+                    .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+                    .codeSize = spirvCode->getBufferSize(),
+                    .pCode = (uint32_t*)spirvCode->getBufferPointer()
+                };
+
+                VkShaderModule shaderModule;
+                if(!aZero::RenderAPI::chkSucceed(vkCreateShaderModule(modules[0]->m_diCore->GetLogicalDevice(), &shaderModuleCI, nullptr, &shaderModule)))
+                {
+                    return nullptr;
+                }
+
+                VkShaderStageFlagBits stage = SlangStageToVkStage(entryPoint->getStage());
+                
+                modulesRefl[entryPoint->getName()] = {
+                    .Name = std::string(reflModule.entry_point_name),
+                    .VkModule = shaderModule,
+                    .Stage = stage
+                };
+            }
+
+            for (auto& [setIndex, reflectedSet] : dsRefl) 
+            {
+                bool hasVariableBinding = false;
+                std::vector<VkDescriptorSetLayoutBinding> bindings;
+                std::vector<VkDescriptorBindingFlags> bindingFlags;
+                for (auto& [bindingIndex, binding] : reflectedSet.LayoutBindings)
+                {
+                    VkDescriptorBindingFlags flags = 0;
+
+                    if (binding.VkLayout.descriptorCount == 0)
+                    {
+                        binding.VkLayout.descriptorCount = modules[0]->m_diCore->GetVariadicDescriptorCount();
+                        binding.HasVariableBinding = true;
+
+                        flags = VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT;
+                        hasVariableBinding = true;
+                    }
+
+                    bindings.push_back(binding.VkLayout);
+                    bindingFlags.push_back(flags);
+                }
+
+                VkDescriptorSetLayoutCreateInfo descLayoutTexCI{
+                        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+                        .bindingCount = (uint32_t)bindings.size(),
+                        .pBindings = bindings.data()
+                };
+
+
+                VkDescriptorSetLayoutBindingFlagsCreateInfo descBindingFlags{
+                       .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO,
+                       .bindingCount = (uint32_t)bindingFlags.size(),
+                       .pBindingFlags = bindingFlags.data()
+                };
+
+                if (hasVariableBinding)
+                {
+                    descLayoutTexCI.pNext = &descBindingFlags;
+                }
+
+                /*
+                    NOTE!
+                    If a descriptor binding in the shader has [], aka VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT, then it needs to be the last binding in that set.
+                */
+                if (!aZero::RenderAPI::chkSucceed(vkCreateDescriptorSetLayout(modules[0]->m_diCore->GetLogicalDevice(), &descLayoutTexCI, nullptr, &reflectedSet.Layout)))
+                {
+                    return nullptr;
+                }
+            }
+
+
+            m_Reflection.Modules = std::move(modulesRefl);
+            m_Reflection.PushConstants = std::move(pcRefl);
+            m_Reflection.DescriptorSets = std::move(dsRefl);
+
+            return linkedProgram;
+        }
+
     };
 
     class CompilerSession

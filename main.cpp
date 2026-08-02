@@ -123,6 +123,40 @@ int main()
         .EnableValidationLayer = true
     };
     RenderAPI::Core core(coreDesc);
+
+    // ----------------------------------------------------------------------------------------------------
+    // create and compile slang shader
+    Compiler::Compiler compiler(core);
+    Compiler::CompilerSession::Desc d;
+    d.CompilerOptions = std::vector<slang::CompilerOptionEntry>({
+        {
+            slang::CompilerOptionName::EmitSpirvDirectly,
+            {slang::CompilerOptionValueKind::Int, 1}
+        },
+        {
+            slang::CompilerOptionName::DebugInformation,
+            {slang::CompilerOptionValueKind::Int, SLANG_DEBUG_INFO_LEVEL_STANDARD}
+        },
+        {
+            slang::CompilerOptionName::Optimization,
+            {slang::CompilerOptionValueKind::Int, SLANG_OPTIMIZATION_LEVEL_NONE}
+        }
+        });
+    d.PreprocessorMacros.push_back({ "HELLO", "" });
+
+    Compiler::CompilerSession session = compiler.CreateSession(d).value();
+
+    Compiler::ShaderModule module = session.LoadModule("C:/Projects/Programming/Hello_Vulkan/Loading_Assets/pixel.slang").value();
+    Compiler::ShaderModule moduleTest = session.LoadModule("C:/Projects/Programming/Hello_Vulkan/Loading_Assets/TestShader2.slang").value();
+
+    Compiler::ShaderProgram::VertexDesc vsProgramDesc{
+        .EntryPoints = {"vsMain", "psMain"},
+        .Modules = {&module}
+    };
+    Compiler::ShaderProgram program(vsProgramDesc);
+
+    // ----------------------------------------------------------------------------------------------------
+
     RenderAPI::CommandQueue graphicsQueue(core, RenderAPI::EQueueType::Graphics);
 
     // setup window and surface (thanks aZeroWindow <3)
@@ -253,7 +287,7 @@ int main()
 
     RenderAPI::Sampler sampler(core, {});
 
-    RenderAPI::DescriptorSet::Desc setDesc{ .Type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .DescriptorCount = 1024, .ShaderStages = VkShaderStageFlagBits::VK_SHADER_STAGE_ALL };
+    RenderAPI::DescriptorSet::Desc setDesc{ .Type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .DescriptorCount = core.GetVariadicDescriptorCount(), .ShaderStages = VkShaderStageFlagBits::VK_SHADER_STAGE_FRAGMENT_BIT};
     RenderAPI::DescriptorPool::Desc descriptorPoolDesc{
         .MaxSets = 1,
         .Sets {setDesc}
@@ -268,32 +302,9 @@ int main()
     };
     descriptorSet.UpdateDescriptor(descriptorHandle);
 
-    // create and compile slang shader
-    Compiler::Compiler compiler(core);
-    Compiler::CompilerSession::Desc d;
-    d.CompilerOptions = std::vector<slang::CompilerOptionEntry>({
-        {
-            slang::CompilerOptionName::EmitSpirvDirectly,
-            {slang::CompilerOptionValueKind::Int, 1}
-        },
-        {
-            slang::CompilerOptionName::DebugInformation,
-            {slang::CompilerOptionValueKind::Int, SLANG_DEBUG_INFO_LEVEL_STANDARD}
-        },
-        {
-            slang::CompilerOptionName::Optimization,
-            {slang::CompilerOptionValueKind::Int, SLANG_OPTIMIZATION_LEVEL_NONE}
-        }
-    });
-    d.PreprocessorMacros.push_back({ "HELLO", "" });
-
-    Compiler::CompilerSession session = compiler.CreateSession(d).value();
-
-    Compiler::ShaderModule module = session.LoadModule("C:/Projects/Programming/Hello_Vulkan/Loading_Assets/pixel.slang").value();
-
     Pipeline::RenderPass renderPass(core);
     Pipeline::RenderPass::VertexPassDesc vpDesc;
-    vpDesc.Module = &module;
+    vpDesc.Program = &program;
     vpDesc.DepthDesc = Pipeline::RenderPass::VertexPassDesc::DepthStencil();
     vpDesc.RenderTargetFormats = { VK_FORMAT_B8G8R8A8_SRGB };
     Pipeline::RenderPass::VertexPassDesc::VertexBinding vBinding;
@@ -301,8 +312,6 @@ int main()
     vBinding.InputRate = VK_VERTEX_INPUT_RATE_VERTEX;
     vBinding.Stride = sizeof(aZero::Asset::Vertex);
     vpDesc.VertexBindings = { vBinding };
-    vpDesc.VS_EntryPoint = "main";
-    vpDesc.PS_EntryPoint = "main";
     renderPass.CompileVertexPass(vpDesc);
 
     uint64_t lastTime{ SDL_GetTicks() };
@@ -392,7 +401,8 @@ int main()
                     cb.SetIndexBuffer(vBuffer, sizeof(aZero::Asset::Vertex) * meshData.Vertices.size());
 
                     auto pushconst = shaderDataBuffers[frameIndex].GetDeviceAddress().value();
-                    vkCmdPushConstants(cb.Get(), pass.GetPipelineLayout(), VK_SHADER_STAGE_ALL, 0, sizeof(VkDeviceAddress), &pushconst);
+                    auto pc = pass.GetReflection().PushConstants.at("pc");
+                    vkCmdPushConstants(cb.Get(), pass.GetPipelineLayout(), pc.StageFlags, pc.Offset, pc.Size, &pushconst);
 
                     cb.DrawIndexed((uint32_t)meshData.Indices.size(), 3, 0, 0, 0);
                 }

@@ -1,14 +1,18 @@
+// https://docs.shader-slang.org/en/latest/external/core-module-reference/attributes/vk_binding.html
+
 struct VSInput {
     float3 Pos;
     uint Normal;
     uint UV;
 };
 
-[[vk::binding(0, 0)]]
+[[vk::binding(0, 0)]] // [vk::binding(binding : int, set : int)]
 Sampler2D textures[];
 
 [[vk::binding(0, 1)]]
 SamplerState samplers[];
+[[vk::binding(1, 1)]]
+SamplerState aaaa[2];
 
 struct PushConstants
 {
@@ -71,7 +75,7 @@ float2 Unpack32ToHalfFloats(uint p)
 }
 
 [shader("vertex")]
-VSOutput main(VSInput input, uint instanceIndex : SV_VulkanInstanceID) {
+VSOutput vsMain(VSInput input, uint instanceIndex : SV_VulkanInstanceID) {
     VSOutput output;
     ShaderData *shaderData = (ShaderData *)pc.address;
     float4x4 modelMat = shaderData->model[instanceIndex];

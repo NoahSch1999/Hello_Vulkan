@@ -37,6 +37,18 @@ FetchContent_Declare(Vma
 FetchContent_MakeAvailable(Vma)
 #
 
+# Spir-v Reflection
+FetchContent_Declare(SpirvReflection
+    GIT_REPOSITORY https://github.com/KhronosGroup/SPIRV-Reflect.git
+    GIT_TAG "vulkan-sdk-1.4.350.0"
+    GIT_SHALLOW TRUE
+)
+set(SPIRV_REFLECT_EXECUTABLE OFF CACHE BOOL "" FORCE)
+set(SPIRV_REFLECT_STATIC_LIB ON CACHE BOOL "" FORCE)
+set(SPIRV_REFLECT_INSTALL OFF CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(SpirvReflection)
+#
+
 # GLM
 FetchContent_Declare(GLM
     GIT_REPOSITORY https://github.com/g-truc/glm.git
@@ -147,4 +159,5 @@ target_link_libraries(${NAME}
     glm::glm
     meshoptimizer
     slang
+    spirv-reflect-static
 )
