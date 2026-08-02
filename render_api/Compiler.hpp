@@ -56,38 +56,6 @@ namespace aZero::Compiler
         return VkShaderStageFlagBits::VK_SHADER_STAGE_ALL;
     }
 
-    VkDescriptorType SlangBindingTypeToVkDescriptorType(slang::BindingType type)
-    {
-        switch (type)
-        {
-            case slang::BindingType::CombinedTextureSampler:
-            {
-                return VkDescriptorType::VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-            }
-            case slang::BindingType::RawBuffer:
-            {
-                return VkDescriptorType::VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-            }
-            case slang::BindingType::Texture:
-            {
-                return VkDescriptorType::VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-            }
-            case slang::BindingType::Sampler:
-            {
-                return VkDescriptorType::VK_DESCRIPTOR_TYPE_SAMPLER;
-            }
-            case slang::BindingType::ConstantBuffer:
-            {
-                return VkDescriptorType::VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-            }
-            default:
-            {
-                throw std::runtime_error("Binding type not supported.");
-            }
-        }
-        return VkDescriptorType::VK_DESCRIPTOR_TYPE_MAX_ENUM;
-    }
-
     VkDescriptorType SpirvBindingTypeToVkDescriptorType(SpvReflectDescriptorType type)
     {
         switch (type)
@@ -120,47 +88,19 @@ namespace aZero::Compiler
         return VkDescriptorType::VK_DESCRIPTOR_TYPE_MAX_ENUM;
     }
 
-    struct ShaderBinding
-    {
-        std::size_t Binding;
-        std::size_t Space;
-        std::size_t Stride;
-        std::size_t DescriptorCount;
-        slang::TypeReflection::Kind Kind;
-        slang::ParameterCategory Category;
-        slang::BindingType Type;
-    };
-
     class ShaderModule
     {
         friend class ShaderProgram;
         friend class CompilerSession;
     public:
-
         ShaderModule() = default;
-        VkShaderModule Get() const { return m_ShaderModule; }
-        slang::IModule* GetSlangModule() const { return m_SlangModule.get(); }
-        slang::ISession* GetSession() const { return m_Session.get(); }
 
     private:
-        ShaderModule(Slang::ComPtr<slang::IModule> module, Slang::ComPtr<slang::ISession> session, RenderAPI::Core& core)// todo REMOVE
-            :m_SlangModule(module), m_Session(session), m_diCore(&core)
-        {
-            Slang::ComPtr<ISlangBlob> spirv;
-            module->getTargetCode(0, spirv.writeRef());
-
-            VkShaderModuleCreateInfo shaderModuleCI{
-                .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
-                .codeSize = spirv->getBufferSize(),
-                .pCode = (uint32_t*)spirv->getBufferPointer()
-            };
-
-            aZero::RenderAPI::chkSucceed(vkCreateShaderModule(m_diCore->GetLogicalDevice(), &shaderModuleCI, nullptr, &m_ShaderModule));
-        }
+        ShaderModule(Slang::ComPtr<slang::IModule> module, Slang::ComPtr<slang::ISession> session, RenderAPI::Core& core)
+            :m_SlangModule(module), m_Session(session), m_diCore(&core) { }
        
         Slang::ComPtr<slang::IModule> m_SlangModule;
         Slang::ComPtr<slang::ISession> m_Session;
-        VkShaderModule m_ShaderModule; // todo REMOVE
         RenderAPI::Core* m_diCore = nullptr;
     };
 
@@ -288,7 +228,7 @@ namespace aZero::Compiler
                 for (const auto& entryPoint : entryPoints)
                 {
                     Slang::ComPtr<slang::IEntryPoint> entry;
-                    module->GetSlangModule()->findEntryPointByName(entryPoint.c_str(), entry.writeRef());
+                    module->m_SlangModule->findEntryPointByName(entryPoint.c_str(), entry.writeRef());
                     if (entry.get())
                     {
                         programComponents.push_back(entry);
@@ -301,7 +241,7 @@ namespace aZero::Compiler
         {
             Slang::ComPtr<slang::IComponentType> compiledProgram;
             Slang::ComPtr<slang::IBlob> diagnostics;
-            if (SLANG_FAILED(modules[0]->GetSession()->createCompositeComponentType(
+            if (SLANG_FAILED(modules[0]->m_Session->createCompositeComponentType(
                 programComponents.data(),
                 programComponents.size(),
                 compiledProgram.writeRef(),
