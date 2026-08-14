@@ -4,6 +4,11 @@
 #include "Core.hpp"
 #include "spirv_reflect.h"
 #include <unordered_set>
+#include <unordered_map>
+#include <variant>
+#include <filesystem>
+#include <fstream>
+#include <array>
 
 /*
     auto slangOptions = std::to_array<slang::CompilerOptionEntry>({
@@ -24,7 +29,14 @@
 
 namespace aZero::Compiler
 {
-    VkShaderStageFlagBits SlangStageToVkStage(SlangStage stage)
+
+    struct PushConstantRangeReflection // todo Rename to PushConstantRangeReflection
+    {
+        VkPushConstantRange Range;
+        std::unordered_map<std::string, VkPushConstantRange> Members;
+    };
+
+    inline VkShaderStageFlagBits SlangStageToVkStage(SlangStage stage)
     {
         switch (stage)
         {
@@ -56,7 +68,7 @@ namespace aZero::Compiler
         return VkShaderStageFlagBits::VK_SHADER_STAGE_ALL;
     }
 
-    VkDescriptorType SpirvBindingTypeToVkDescriptorType(SpvReflectDescriptorType type)
+    inline VkDescriptorType SpirvBindingTypeToVkDescriptorType(SpvReflectDescriptorType type)
     {
         switch (type)
         {
@@ -104,14 +116,9 @@ namespace aZero::Compiler
         RenderAPI::Core* m_diCore = nullptr;
     };
 
-    class ShaderProgram
+    class ShaderProgram : public DeleteCopy
     {
     public:
-        struct PushConstantReflection
-        {
-            std::string Name;
-            VkPushConstantRange Range;
-        };
 
         struct DescriptorSetReflection
         {
@@ -136,7 +143,7 @@ namespace aZero::Compiler
         struct Reflection
         {
             std::unordered_map<std::string, ModuleReflection> Modules;
-            std::unordered_map<uint32_t, PushConstantReflection> PushConstants;
+            std::unordered_map<std::string, PushConstantRangeReflection> PushConstants;
             std::unordered_map<uint32_t, DescriptorSetReflection> DescriptorSets;
         };
 
@@ -161,6 +168,34 @@ namespace aZero::Compiler
         using Desc = std::variant<VertexDesc, MeshletDesc, ComputeDesc>;
 
         ShaderProgram() = default;
+        ~ShaderProgram()
+        {
+            if (m_diCore)
+            {
+                for (auto& [name, module] : m_Reflection.Modules)
+                {
+                    vkDestroyShaderModule(m_diCore->GetLogicalDevice(), module.VkModule, nullptr);
+                }
+
+                for (auto& [index, set] : m_Reflection.DescriptorSets)
+                {
+                    vkDestroyDescriptorSetLayout(m_diCore->GetLogicalDevice(), set.Layout, nullptr);
+                }
+            }
+        }
+
+        ShaderProgram(ShaderProgram&& other) noexcept
+        {
+            *this = std::move(other);
+        }
+
+        ShaderProgram& operator=(ShaderProgram&& other) noexcept
+        {
+            std::swap(m_Program, other.m_Program);
+            std::swap(m_diCore, other.m_diCore);
+            std::swap(m_Reflection, other.m_Reflection);
+            return *this;
+        }
 
         ShaderProgram(const Desc& desc)
         {
@@ -182,7 +217,7 @@ namespace aZero::Compiler
             std::vector<slang::IComponentType*> programComponents;
             for (const ShaderModule* module : desc.Modules)
             {
-                programComponents.push_back(module->GetSlangModule());
+                programComponents.push_back(module->m_SlangModule);
             }
 
             this->AddEntryPoints(desc, programComponents);
@@ -194,7 +229,7 @@ namespace aZero::Compiler
             }
 
             m_Program = builtProgram;
-            m_Desc = desc;
+            m_diCore = desc.Modules[0]->m_diCore;
 
             return true;
         }
@@ -203,8 +238,8 @@ namespace aZero::Compiler
 
     private:
         Slang::ComPtr<slang::IComponentType> m_Program;
-        Desc m_Desc;
         Reflection m_Reflection;
+        RenderAPI::Core* m_diCore = nullptr;
 
         void AddEntryPoints(const MeshletDesc& desc, std::vector<slang::IComponentType*>& programComponents)
         {
@@ -264,11 +299,12 @@ namespace aZero::Compiler
                 return nullptr;
             }
 
-            std::unordered_map<uint32_t, PushConstantReflection> pcRefl;
+            std::unordered_map<std::string, PushConstantRangeReflection> pcRefl;
             std::unordered_map<uint32_t, DescriptorSetReflection> dsRefl;
             std::unordered_map<std::string, ModuleReflection> modulesRefl;
 
             Slang::ComPtr<slang::IBlob> spirvCode;
+            uint32_t basePushConstantBlockOffset = 0;
             for (uint32_t i = 0; i < linkedProgram->getLayout()->getEntryPointCount(); i++)
             {
                 if (SLANG_FAILED(linkedProgram->getEntryPointCode(i, 0 /* spirv set during session creation */, spirvCode.writeRef(), diagnostics.writeRef())))
@@ -287,19 +323,34 @@ namespace aZero::Compiler
                 for (uint32_t j = 0; j < reflModule.push_constant_block_count; j++)
                 {
                     const SpvReflectBlockVariable& block = reflModule.push_constant_blocks[j];
-                    if (!pcRefl.contains(block.offset))
+                    if (!pcRefl.contains(std::string(block.name)))
                     {
-                        PushConstantReflection rangeRefl{
-                            .Name = std::string(block.name),
+                        PushConstantRangeReflection rangeRefl{
                             .Range {
-                               .offset = block.offset,
+                               .offset = basePushConstantBlockOffset,
                                .size = block.size,
                             }
                         };
-                        pcRefl[block.offset] = rangeRefl;
+
+                        for (uint32_t k = 0; k < block.member_count; k++)
+                        {
+                            VkPushConstantRange memberRange{
+                                .stageFlags = (VkShaderStageFlags)SlangStageToVkStage(entryPoint->getStage()),
+                                .offset = block.members[k].offset,
+                                .size = block.members[k].size
+                            };
+                            rangeRefl.Members[std::string(block.members[k].name)] = memberRange;
+                        }
+                        basePushConstantBlockOffset += block.size;
+                        basePushConstantBlockOffset = (basePushConstantBlockOffset + 15) & ~size_t(15); // Force 16-byte alignment across blocks
+                        pcRefl[std::string(block.name)] = rangeRefl;
                     }
 
-                    pcRefl[block.offset].Range.stageFlags |= SlangStageToVkStage(entryPoint->getStage());
+                    for (auto& [name, member] : pcRefl[std::string(block.name)].Members)
+                    {
+                        member.stageFlags |= SlangStageToVkStage(entryPoint->getStage());
+                    }
+                    pcRefl[std::string(block.name)].Range.stageFlags |= SlangStageToVkStage(entryPoint->getStage());
                 }
 
                 for (uint32_t j = 0; j < reflModule.descriptor_set_count; j++)
@@ -396,7 +447,6 @@ namespace aZero::Compiler
                     return nullptr;
                 }
             }
-
 
             m_Reflection.Modules = std::move(modulesRefl);
             m_Reflection.PushConstants = std::move(pcRefl);

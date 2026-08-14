@@ -3,21 +3,44 @@
 
 namespace aZero::RenderAPI
 {
-    class Fence
+    class Fence : public DeleteCopy
     {
     public:
         Fence() = default;
-        Fence(Core& core)
+        ~Fence()
         {
-            this->Init(core);
+            if (m_diCore)
+            {
+                vkDestroyFence(m_diCore->GetLogicalDevice(), m_Fence, nullptr);
+            }
         }
 
-        void Init(Core& core)
+        Fence(Fence&& other) noexcept
+        {
+            *this = std::move(other);
+        }
+
+        Fence& operator=(Fence&& other) noexcept
+        {
+            std::swap(m_diCore, other.m_diCore);
+            std::swap(m_Fence, other.m_Fence);
+            return *this;
+        }
+
+        Fence(Core& core, bool startAsSignalled = false)
+        {
+            this->Init(core, startAsSignalled);
+        }
+
+        void Init(Core& core, bool startAsSignalled = false)
         {
             VkFenceCreateInfo fenceCI{
-                .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
-                .flags = VK_FENCE_CREATE_SIGNALED_BIT
+                .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO
             };
+            if (startAsSignalled)
+            {
+                fenceCI.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+            }
             chkSucceed(vkCreateFence(core.GetLogicalDevice(), &fenceCI, nullptr, &m_Fence));
 
             m_diCore = &core;

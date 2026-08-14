@@ -1,6 +1,9 @@
 #pragma once
 #include "Core.hpp"
 #include "Compiler.hpp"
+#include "CommandPool.hpp"
+#include "Descriptor.hpp"
+#include <functional>
 
 namespace aZero::Pipeline
 {
@@ -14,22 +17,65 @@ namespace aZero::Pipeline
         NOTE!
         Currently only supports one binding per set.
     */
-    class RenderPass
+    class RenderPass : public DeleteCopy
     {
     public:
-        struct PushConstantBinding
-        {
-            VkShaderStageFlags StageFlags;
-            uint32_t Offset;
-            uint32_t Size;
-        };
 
         struct Reflection
         {
-            std::unordered_map<std::string, PushConstantBinding> PushConstants;
+            std::unordered_map<std::string, Compiler::PushConstantRangeReflection> PushConstants;
         };
 
+        RenderAPI::Binding GetPushConstantBinding(const std::string& block, const std::string& member) const
+        {
+            RenderAPI::Binding binding;
+            if (const auto iter = m_Reflection.PushConstants.find(block); iter != m_Reflection.PushConstants.end())
+            {
+                if (const auto iter2 = iter->second.Members.find(member); iter2 != iter->second.Members.end())
+                {
+                    binding = RenderAPI::Binding(iter2->second, m_Layout);
+                }
+            }
+            return binding;
+        }
+
+        RenderAPI::Binding GetPushConstantBlock(const std::string& block) const
+        {
+            RenderAPI::Binding binding;
+            if (const auto iter = m_Reflection.PushConstants.find(block); iter != m_Reflection.PushConstants.end())
+            {
+                binding = RenderAPI::Binding(iter->second.Range, m_Layout);
+            }
+            return binding;
+        }
+
         RenderPass() = default;
+        ~RenderPass()
+        {
+            if (m_diCore)
+            {
+                vkDestroyPipelineLayout(m_diCore->GetLogicalDevice(), m_Layout, nullptr);
+                vkDestroyPipeline(m_diCore->GetLogicalDevice(), m_Pipeline, nullptr);
+            }
+        }
+
+        RenderPass(RenderPass&& other) noexcept
+        {
+            *this = std::move(other);
+        }
+
+        RenderPass& operator=(RenderPass&& other) noexcept
+        {
+            std::swap(m_diCore, other.m_diCore);
+            std::swap(m_Type, other.m_Type);
+            std::swap(m_NumColorTargets, other.m_NumColorTargets);
+            std::swap(m_HasDepthStencilTarget, other.m_HasDepthStencilTarget);
+            std::swap(m_Reflection, other.m_Reflection);
+            std::swap(m_Layout, other.m_Layout);
+            std::swap(m_Pipeline, other.m_Pipeline);
+            return *this;
+        }
+
         RenderPass(aZero::RenderAPI::Core& core)
             :m_diCore(&core) { }
 
@@ -113,7 +159,7 @@ namespace aZero::Pipeline
             renderingInfo.pColorAttachments = colorAttachments.data();
 
             VkRenderingAttachmentInfo depthAttachmentInfo;
-            if (!m_HasDepthStencilTarget)
+            if (!m_HasDepthStencilTarget && renderDesc.DepthTarget.View)
             {
                 depthAttachmentInfo = { // specific to dynamic rendering
                     .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
@@ -203,7 +249,72 @@ namespace aZero::Pipeline
             std::vector<VertexBinding> VertexBindings;
         };
 
-        bool CompileVertexPass(const VertexPassDesc& desc)
+        using MeshShaderPassDesc = Desc;
+
+        bool Compile(const MeshShaderPassDesc& desc)
+        {
+            return this->CompilePipeline(desc, {}, {});
+        }
+
+        bool Compile(const VertexPassDesc& desc)
+        {
+            std::vector<VkVertexInputAttributeDescription> vertexAttributes;
+
+            std::vector<VkVertexInputBindingDescription> vertexBindings(desc.VertexBindings.size());
+            for (uint32_t i = 0; i < vertexBindings.size(); i++)
+            {
+                vertexBindings[i] = {
+                    .binding = i,
+                    .stride = desc.VertexBindings[i].Stride,
+                    .inputRate = desc.VertexBindings[i].InputRate
+                };
+
+                uint32_t localAttributeOffset = 0;
+                for (uint32_t j = 0; j < desc.VertexBindings[i].AttributeFormats.size(); j++)
+                {
+                    VkVertexInputAttributeDescription attribute{
+                        .location = static_cast<uint32_t>(vertexAttributes.size()),
+                        .binding = i,
+                        .format = desc.VertexBindings[i].AttributeFormats[j],
+                        .offset = localAttributeOffset
+                    };
+
+                    localAttributeOffset += aZero::RenderAPI::GetFormatStride(desc.VertexBindings[i].AttributeFormats[j]);
+
+                    vertexAttributes.push_back(attribute);
+                }
+            };
+
+            VkPipelineVertexInputStateCreateInfo vertexInputState{
+                .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+                .vertexBindingDescriptionCount = static_cast<uint32_t>(vertexBindings.size()),
+                .pVertexBindingDescriptions = vertexBindings.data(),
+                .vertexAttributeDescriptionCount = static_cast<uint32_t>(vertexAttributes.size()),
+                .pVertexAttributeDescriptions = vertexAttributes.data(),
+            };
+
+            VkPipelineInputAssemblyStateCreateInfo inputAssemblyState{ // defines how the primitives are assembled
+                .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+                .topology = desc.RasterDesc.PrimitiveMode == VkPolygonMode::VK_POLYGON_MODE_FILL ?
+                    VkPrimitiveTopology::VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST : desc.RasterDesc.PrimitiveMode == VkPolygonMode::VK_POLYGON_MODE_LINE ?
+                    VkPrimitiveTopology::VK_PRIMITIVE_TOPOLOGY_LINE_LIST : VkPrimitiveTopology::VK_PRIMITIVE_TOPOLOGY_POINT_LIST
+            };
+
+            return this->CompilePipeline(desc, vertexInputState, inputAssemblyState);
+        }
+
+        VkPipeline GetPipeline() const { return m_Pipeline; }
+        VkPipelineLayout GetPipelineLayout() const { return m_Layout; }
+        const Reflection& GetReflection() const { return m_Reflection; }
+
+    private:
+        void PopulateReflection(const Compiler::ShaderProgram::Reflection& reflection)
+        {
+            m_Reflection.PushConstants = reflection.PushConstants;
+        }
+
+        template<typename T>
+        bool CompilePipeline(const T& desc, std::optional<VkPipelineVertexInputStateCreateInfo> vertexInputState, std::optional<VkPipelineInputAssemblyStateCreateInfo> inputAssemblyState)
         {
             if (!m_diCore) {
                 std::cout << "No vulkan core available.\n";
@@ -259,49 +370,6 @@ namespace aZero::Pipeline
             };
             //
 
-            std::vector<VkVertexInputAttributeDescription> vertexAttributes;
-
-            std::vector<VkVertexInputBindingDescription> vertexBindings(desc.VertexBindings.size());
-            for (uint32_t i = 0; i < vertexBindings.size(); i++)
-            {
-                vertexBindings[i] = {
-                    .binding = i,
-                    .stride = desc.VertexBindings[i].Stride,
-                    .inputRate = desc.VertexBindings[i].InputRate
-                };
-
-                uint32_t localAttributeOffset = 0;
-                for (uint32_t j = 0; j < desc.VertexBindings[i].AttributeFormats.size(); j++)
-                {
-                    VkVertexInputAttributeDescription attribute{
-                        .location = static_cast<uint32_t>(vertexAttributes.size()),
-                        .binding = i,
-                        .format = desc.VertexBindings[i].AttributeFormats[j],
-                        .offset = localAttributeOffset
-                    };
-
-                    localAttributeOffset += aZero::RenderAPI::GetFormatStride(desc.VertexBindings[i].AttributeFormats[j]);
-
-                    vertexAttributes.push_back(attribute);
-                }
-            };
-
-            VkPipelineVertexInputStateCreateInfo vertexInputState{
-                .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-                .vertexBindingDescriptionCount = static_cast<uint32_t>(vertexBindings.size()),
-                .pVertexBindingDescriptions = vertexBindings.data(),
-                .vertexAttributeDescriptionCount = static_cast<uint32_t>(vertexAttributes.size()),
-                .pVertexAttributeDescriptions = vertexAttributes.data(),
-            };
-            // -------------------------
-
-            VkPipelineInputAssemblyStateCreateInfo inputAssemblyState{ // defines how the primitives are assembled
-                .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
-                .topology = desc.RasterDesc.PrimitiveMode == VkPolygonMode::VK_POLYGON_MODE_FILL ?
-                    VkPrimitiveTopology::VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST : desc.RasterDesc.PrimitiveMode == VkPolygonMode::VK_POLYGON_MODE_LINE ?
-                    VkPrimitiveTopology::VK_PRIMITIVE_TOPOLOGY_LINE_LIST : VkPrimitiveTopology::VK_PRIMITIVE_TOPOLOGY_POINT_LIST
-            };
-
             VkPipelineRenderingCreateInfo renderingCI{ // this tells the rendering pipeline that we are using "dynamic rendering"
                 .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
                 .colorAttachmentCount = (uint32_t)desc.RenderTargetFormats.size(),
@@ -348,8 +416,6 @@ namespace aZero::Pipeline
                 .pNext = &renderingCI, // pass the VkPipelineRenderingCreateInfo as pNext since theres no dedicated member in the VkGraphicsPipelineCreateInfo struct (since dynamic rendering was added later)
                 .stageCount = (uint32_t)shaderStages.size(),
                 .pStages = shaderStages.data(),
-                .pVertexInputState = &vertexInputState,
-                .pInputAssemblyState = &inputAssemblyState,
                 .pViewportState = &viewportState,
                 .pRasterizationState = &rasterizationState,
                 .pMultisampleState = &multisampleState,
@@ -359,6 +425,13 @@ namespace aZero::Pipeline
                 .layout = m_Layout
             };
 
+            if (vertexInputState.has_value()) {
+                pipelineCI.pVertexInputState = &vertexInputState.value();
+            }
+            if (inputAssemblyState.has_value()) {
+                pipelineCI.pInputAssemblyState = &inputAssemblyState.value();
+            }
+
             // VkPipelineCache can be used here to cache the result for future re-use. This can be saved and then loaded again between app runs.
             if (!aZero::RenderAPI::chkSucceed(vkCreateGraphicsPipelines(m_diCore->GetLogicalDevice(), VK_NULL_HANDLE, 1, &pipelineCI, nullptr, &m_Pipeline)))
             {
@@ -367,23 +440,7 @@ namespace aZero::Pipeline
 
             this->PopulateReflection(desc.Program->GetReflection());
             m_Type = ERenderPassType::Graphics;
-        }
-
-        VkPipeline GetPipeline() const { return m_Pipeline; }
-        VkPipelineLayout GetPipelineLayout() const { return m_Layout; }
-        const Reflection& GetReflection() const { return m_Reflection; }
-
-    private:
-        void PopulateReflection(const Compiler::ShaderProgram::Reflection& reflection)
-        {
-            for (const auto& [offset, pconstant] : reflection.PushConstants)
-            {
-                m_Reflection.PushConstants[pconstant.Name] = {
-                    .StageFlags = pconstant.Range.stageFlags,
-                    .Offset = offset,
-                    .Size = pconstant.Range.size
-                };
-            }
+            return true;
         }
 
         ERenderPassType m_Type;

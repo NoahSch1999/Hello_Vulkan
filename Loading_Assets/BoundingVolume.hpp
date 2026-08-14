@@ -8,4 +8,19 @@ namespace aZero::BoundingVolume
 		glm::vec3 Origin;
 		float Radius;
 	};
+
+	struct BoundingFrustum
+	{
+		glm::vec4 Rotation;
+
+		glm::vec3 Position;
+        float RightSlope;
+
+        float LeftSlope;
+        float TopSlope;
+        float BottomSlope;
+        float Near;
+
+        float Far;
+	};
 }

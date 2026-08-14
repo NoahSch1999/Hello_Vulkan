@@ -2,6 +2,8 @@
 #include "Fence.hpp"
 #include "Semaphore.hpp"
 #include "CommandPool.hpp"
+#include "Buffer.hpp"
+#include "Image.hpp"
 
 namespace aZero::RenderAPI
 {

@@ -16,18 +16,51 @@ namespace aZero::RenderAPI
         }
     }
 
-	class Swapchain
+	class Swapchain : public DeleteCopy
 	{
 	public:
         struct Desc
         {
             VkSurfaceKHR Surface;
-            VkFormat Format;
+            EImageFormat Format;
             uint32_t FramesInFlight;
             uint32_t Width, Height;
         };
 
         Swapchain() = default;
+        ~Swapchain()
+        {
+            if (m_diCore)
+            {
+                vkDestroySwapchainKHR(m_diCore->GetLogicalDevice(), m_Swapchain, nullptr);
+                vkDestroySurfaceKHR(m_diCore->GetInstance(), m_Surface, nullptr);
+                for (auto& bbImageView : m_BackBufferViews)
+                {
+                    vkDestroyImageView(m_diCore->GetLogicalDevice(), bbImageView, nullptr);
+                }
+            }
+        }
+
+        Swapchain(Swapchain&& other) noexcept
+        {
+            *this = std::move(other);
+        }
+
+        Swapchain& operator=(Swapchain&& other) noexcept
+        {
+            std::swap(m_diCore, other.m_diCore);
+            std::swap(m_CurrentFrameIndex, other.m_CurrentFrameIndex);
+            std::swap(m_CurrentBackBuffer, other.m_CurrentBackBuffer);
+            std::swap(m_Surface, other.m_Surface);
+            std::swap(m_Swapchain, other.m_Swapchain);
+            std::swap(m_CreateInfo, other.m_CreateInfo);
+            std::swap(m_BackBuffers, other.m_BackBuffers);
+            std::swap(m_BackBufferViews, other.m_BackBufferViews);
+            std::swap(m_ImageReadySemaphores, other.m_ImageReadySemaphores);
+            std::swap(m_RenderCompleteSemaphores, other.m_RenderCompleteSemaphores);
+            return *this;
+        }
+
         Swapchain(Core& core, const Desc& desc)
         {
             this->Init(core, desc);
@@ -45,13 +78,12 @@ namespace aZero::RenderAPI
                 swapchainExtent = { .width = desc.Width, .height = desc.Height };
             }
 
-            const VkFormat imageFormat{ VK_FORMAT_B8G8R8A8_SRGB }; // why b8g8r8 order?
             VkExtent2D extents{ .width = desc.Width, .height = desc.Height };
             VkSwapchainCreateInfoKHR swapchainCI{
                 .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
                 .surface = desc.Surface,
                 .minImageCount = desc.FramesInFlight,
-                .imageFormat = imageFormat,
+                .imageFormat = RenderAPI::ToVK_ImageFormat(desc.Format),
                 .imageColorSpace = VK_COLORSPACE_SRGB_NONLINEAR_KHR,
                 .imageExtent = extents,
                 .imageArrayLayers = 1,
@@ -73,7 +105,7 @@ namespace aZero::RenderAPI
             m_ImageReadySemaphores.resize(imageCount);
             m_RenderCompleteSemaphores.resize(imageCount);
             for (auto i = 0; i < imageCount; i++) {
-                VkImageViewCreateInfo viewCI{ .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, .image = m_BackBuffers[i], .viewType = VK_IMAGE_VIEW_TYPE_2D, .format = imageFormat, .subresourceRange{.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = 1, .layerCount = 1 } };
+                VkImageViewCreateInfo viewCI{ .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, .image = m_BackBuffers[i], .viewType = VK_IMAGE_VIEW_TYPE_2D, .format = RenderAPI::ToVK_ImageFormat(desc.Format), .subresourceRange{.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = 1, .layerCount = 1 } };
                 chkSucceed(vkCreateImageView(core.GetLogicalDevice(), &viewCI, nullptr, &m_BackBufferViews[i]));
                 m_ImageReadySemaphores[i] = RenderAPI::Semaphore(core, RenderAPI::ESemaphoreType::Binary);
                 m_RenderCompleteSemaphores[i] = RenderAPI::Semaphore(core, RenderAPI::ESemaphoreType::Binary);
@@ -173,7 +205,7 @@ namespace aZero::RenderAPI
             .subresourceRange{.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = 1, .layerCount = 1 }
             };
 
-            commandBuffer.Barrier({ barrierPresent });
+            commandBuffer.Barrier({}, { barrierPresent }, {});
         }
 
         void Present(const PresentDesc& desc)

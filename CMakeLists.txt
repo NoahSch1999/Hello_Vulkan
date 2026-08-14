@@ -138,7 +138,7 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(aZeroWindow)
 #
 
-add_executable(${NAME} "main.cpp" "Loading_Assets/STBIHack.cpp")
+add_executable(${NAME} "main.cpp" "Loading_Assets/STBIHack.cpp" "render_api/CommandPool.cpp" "render_api/VolkImpl.cpp")
 
 target_compile_definitions(${NAME} PUBLIC
     VK_NO_PROTOTYPES

@@ -13,7 +13,7 @@ namespace aZero::RenderAPI
         uint32_t Index;
     };
 
-    class DescriptorSet
+    class DescriptorSet : public DeleteCopy
     {
         friend class DescriptorPool;
     public:
@@ -25,6 +25,27 @@ namespace aZero::RenderAPI
         };
 
         DescriptorSet() = default;
+        ~DescriptorSet()
+        {
+            if (m_diCore)
+            {
+                vkDestroyDescriptorSetLayout(m_diCore->GetLogicalDevice(), m_Layout, nullptr);
+            }
+        }
+
+        DescriptorSet(DescriptorSet&& other) noexcept
+        {
+            *this = std::move(other);
+        }
+
+        DescriptorSet& operator=(DescriptorSet&& other) noexcept
+        {
+            std::swap(m_diCore, other.m_diCore);
+            std::swap(m_Set, other.m_Set);
+            std::swap(m_Layout, other.m_Layout);
+            std::swap(m_Desc, other.m_Desc);
+            return *this;
+        }
 
         void UpdateDescriptor(const DescriptorHandle& handle)
         {
@@ -73,7 +94,6 @@ namespace aZero::RenderAPI
         DescriptorSet(Core& core, DescriptorPool& pool, VkDescriptorSet set, VkDescriptorSetLayout layout, const DescriptorSet::Desc& desc)
         {
             m_diCore = &core;
-            m_diPool = &pool;
             m_Set = set;
             m_Layout = layout;
             m_Desc = desc;
@@ -84,11 +104,10 @@ namespace aZero::RenderAPI
         Desc m_Desc;
 
         RenderAPI::Core* m_diCore = nullptr;
-        RenderAPI::DescriptorPool* m_diPool = nullptr;
     };
 
     // todo Make it support other type of descriptors than VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
-    class DescriptorPool
+    class DescriptorPool : public DeleteCopy
     {
     public:
         struct Desc
@@ -98,6 +117,27 @@ namespace aZero::RenderAPI
         };
 
         DescriptorPool() = default;
+        ~DescriptorPool()
+        {
+            if (m_diCore)
+            {
+                vkDestroyDescriptorPool(m_diCore->GetLogicalDevice(), m_DescriptorPool, nullptr);
+            }
+        }
+
+        DescriptorPool(DescriptorPool&& other) noexcept
+        {
+            *this = std::move(other);
+        }
+
+        DescriptorPool& operator=(DescriptorPool&& other) noexcept
+        {
+            std::swap(m_diCore, other.m_diCore);
+            std::swap(m_DescriptorPool, other.m_DescriptorPool);
+            std::swap(m_Desc, other.m_Desc);
+            return *this;
+        }
+
         DescriptorPool(Core& core, const Desc& desc)
         {
             this->Init(core, desc);

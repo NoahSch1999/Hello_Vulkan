@@ -1,9 +1,30 @@
 #pragma once
 #include "Core.hpp"
-#include "Buffer.hpp"
 
 namespace aZero::RenderAPI
 {
+    class Buffer;
+    class Image;
+
+    struct BufferToImageCopyDesc
+    {
+        uint32_t BaseWidth, BaseHeight, DepthOrArrayCount;
+        std::vector<uint32_t> MipOffsets;
+    };
+
+    class Binding
+    {
+        friend class CommandBuffer;
+    public:
+        Binding() = default;
+        Binding(const VkPushConstantRange& pcBinding, VkPipelineLayout layout)
+            :BindingInfo(pcBinding), Layout(layout) {}
+        bool IsValid() const { return Layout != NULL; }
+    private:
+        VkPushConstantRange BindingInfo;
+        VkPipelineLayout Layout = NULL;
+    };
+
     class CommandBuffer
     {
         friend class CommandPool;
@@ -58,6 +79,11 @@ namespace aZero::RenderAPI
             vkCmdDrawIndexed(m_CommandBuffer, indexCount, instanceCount, firstIndex, vertexOffset, firstInstance);
         }
 
+        void DispatchMesh(uint32_t tgx, uint32_t tgy, uint32_t tgz)
+        {
+            vkCmdDrawMeshTasksEXT(m_CommandBuffer, tgx, tgy, tgz);
+        }
+
         void SetScizzorRectsAndViewports(const std::vector<VkViewport>& viewports, const std::vector<VkRect2D>& scizzorRects) const
         {
             vkCmdSetViewport(m_CommandBuffer, 0, viewports.size(), viewports.data());
@@ -69,33 +95,22 @@ namespace aZero::RenderAPI
 
         }
 
-        void SetVertexBuffer(const RenderAPI::Buffer& buffer, uint64_t offset) const
+        void SetVertexBuffer(const RenderAPI::Buffer& buffer, uint64_t offset) const;
+
+        void SetIndexBuffer(const RenderAPI::Buffer& buffer, uint64_t offset, VkIndexType indexType = VK_INDEX_TYPE_UINT32) const;
+
+        template<typename T>
+        void SetPushConstants(const Binding& binding, const T& data) const
         {
-            VkDeviceSize offsetTemp{ offset };
-            std::vector<VkBuffer> buffers{ buffer.Get() };
-            vkCmdBindVertexBuffers(m_CommandBuffer, 0, 1, buffers.data(), &offsetTemp);
+            if (binding.IsValid())
+            {
+                vkCmdPushConstants(m_CommandBuffer, binding.Layout, binding.BindingInfo.stageFlags, binding.BindingInfo.offset, binding.BindingInfo.size, &data);
+            }
         }
 
-        void SetIndexBuffer(const RenderAPI::Buffer& buffer, uint64_t offset, VkIndexType indexType = VK_INDEX_TYPE_UINT32) const
-        {
-            VkDeviceSize offsetTemp{ offset };
-            vkCmdBindIndexBuffer(m_CommandBuffer, buffer.Get(), offsetTemp, indexType);
-        }
+        void Barrier(const std::vector<VkMemoryBarrier2>& globalBarriers, const std::vector<VkImageMemoryBarrier2>& imageBarriers, const std::vector<VkBufferMemoryBarrier2>& bufferBarriers) const;
 
-        void SetPushConstants() const
-        {
-
-        }
-
-        void Barrier(const std::vector<VkImageMemoryBarrier2>& barriers) const
-        {
-            VkDependencyInfo barrierDependencyInfo{
-                .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-                .imageMemoryBarrierCount = (uint32_t)barriers.size(),
-                .pImageMemoryBarriers = barriers.data()
-            };
-            vkCmdPipelineBarrier2(m_CommandBuffer, &barrierDependencyInfo);
-        }
+        void Copy(const BufferToImageCopyDesc& copyDesc, const RenderAPI::Buffer& srcBuffer, const RenderAPI::Image& dstImage);
 
         VkCommandBuffer Get() const { return m_CommandBuffer; }
 
@@ -108,7 +123,7 @@ namespace aZero::RenderAPI
         EQueueType m_Type;
     };
 
-    class CommandPool
+    class CommandPool : public DeleteCopy
     {
     public:
         struct Desc
@@ -117,6 +132,27 @@ namespace aZero::RenderAPI
         };
 
         CommandPool() = default;
+        ~CommandPool()
+        {
+            if (m_diCore)
+            {
+                vkDestroyCommandPool(m_diCore->GetLogicalDevice(), m_CommandPool, nullptr);
+            }
+        }
+
+        CommandPool(CommandPool&& other) noexcept
+        {
+            *this = std::move(other);
+        }
+
+        CommandPool& operator=(CommandPool&& other) noexcept
+        {
+            std::swap(m_diCore, other.m_diCore);
+            std::swap(m_CommandPool, other.m_CommandPool);
+            std::swap(m_Desc, other.m_Desc);
+            return *this;
+        }
+
         CommandPool(Core& core, const Desc& desc)
         {
             this->Init(core, desc);

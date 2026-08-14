@@ -8,6 +8,8 @@ namespace aZero::RenderAPI
     enum class EImageFormat {
         RGBA8_UNORM,
         RGBA8_UNORM_SRGB,
+        BGRA8_UNORM,
+        BGRA8_UNORM_SRGB,
         BC7_UNORM,
         BC7_UNORM_SRGB,
         RGB32_FLOAT,
@@ -34,7 +36,8 @@ namespace aZero::RenderAPI
         Image3D
     };
 
-    enum EImageUsageFlags {
+    enum class EImageUsageBits : std::uint32_t
+    {
         TransferSrc = 0x00000001,
         TransferDst = 0x00000002,
         Sampled = 0x00000004,
@@ -43,12 +46,27 @@ namespace aZero::RenderAPI
         DepthStencil_Attachment = 0x00000020
     };
 
-    enum EImageAspect {
+    constexpr EImageUsageBits operator|(EImageUsageBits lhs, EImageUsageBits rhs)
+    {
+        return static_cast<EImageUsageBits>(
+            static_cast<std::uint32_t>(lhs) |
+            static_cast<std::uint32_t>(rhs));
+    }
+
+    enum EImageAspect : std::uint32_t 
+    {
         Color = 0x00000001,
         Depth = 0x00000002,
         Stencil = 0x00000004,
         DepthStencil = Depth | Stencil
     };
+
+    constexpr EImageAspect operator|(EImageAspect lhs, EImageAspect rhs)
+    {
+        return static_cast<EImageAspect>(
+            static_cast<std::uint32_t>(lhs) |
+            static_cast<std::uint32_t>(rhs));
+    }
 
     // IF VULKAN!
     inline VkFormat ToVK_ImageFormat(EImageFormat format)
@@ -59,6 +77,10 @@ namespace aZero::RenderAPI
             return VkFormat::VK_FORMAT_R8G8B8A8_UNORM;
         case EImageFormat::RGBA8_UNORM_SRGB:
             return VkFormat::VK_FORMAT_R8G8B8A8_SRGB;
+        case EImageFormat::BGRA8_UNORM:
+            return VkFormat::VK_FORMAT_B8G8R8A8_UNORM;
+        case EImageFormat::BGRA8_UNORM_SRGB:
+            return VkFormat::VK_FORMAT_B8G8R8A8_SRGB;
         case EImageFormat::BC7_UNORM:
             return VkFormat::VK_FORMAT_BC7_UNORM_BLOCK;
         case EImageFormat::BC7_UNORM_SRGB:
@@ -114,33 +136,50 @@ namespace aZero::RenderAPI
         }
     }
 
-    class Image
+    class Image : public DeleteCopy
     {
     public:
         struct Desc
         {
             EImageFormat Format;
             EImageType Type;
-            int32_t Usage;
+            EImageUsageBits Usage;
             uint32_t Width = 0u, Height = 0u, Depth = 0u;
             uint32_t MipCount = 1u;
             uint32_t ArrayLayers = 1u;
+            std::string Name;
         };
-
-        struct UploadDesc
-        {
-            uint32_t BaseWidth, BaseHeight, DepthOrArrayCount;
-            std::vector<uint32_t> MipOffsets;
-        };
-
 
         Image() = default;
-        Image(const Core& core, const Desc& desc)
+        ~Image()
+        {
+            if (m_diCore)
+            {
+                vmaDestroyImage(m_diCore->GetVmaAllocator(), m_Image, m_Allocation);
+            }
+        }
+
+        Image(Image&& other) noexcept
+        {
+            *this = std::move(other);
+        }
+
+        Image& operator=(Image&& other) noexcept
+        {
+            std::swap(m_diCore, other.m_diCore);
+            std::swap(m_Image, other.m_Image);
+            std::swap(m_Allocation, other.m_Allocation);
+            std::swap(m_LastBarrier, other.m_LastBarrier);
+            std::swap(m_Desc, other.m_Desc);
+            return *this;
+        }
+
+        Image(Core& core, const Desc& desc)
         {
             this->Init(core, desc);
         }
 
-        void Init(const Core& core, const Desc& desc)
+        void Init(Core& core, const Desc& desc)
         {
             // create depth image
             VkImageCreateInfo depthImageCI{
@@ -175,6 +214,22 @@ namespace aZero::RenderAPI
                 .subresourceRange = { .aspectMask = VK_IMAGE_ASPECT_NONE, .levelCount = 1, .layerCount = 1 }
             };
 
+            if (!desc.Name.empty() && core.IsDebugNamesSupported())
+            {
+                VkDebugUtilsObjectNameInfoEXT nameInfo{};
+                nameInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT;
+                nameInfo.objectType = VK_OBJECT_TYPE_BUFFER;
+                nameInfo.objectHandle = (uint64_t)m_Image;
+                nameInfo.pObjectName = desc.Name.c_str();
+
+                const VkResult enableDebugNamesRes = vkSetDebugUtilsObjectNameEXT(core.GetLogicalDevice(), &nameInfo);
+                if (enableDebugNamesRes != VK_SUCCESS)
+                {
+                    std::cout << "Failed to enable debug name extension.\n";
+                }
+            }
+
+            m_diCore = &core;
             m_Desc = desc;
         }
 
@@ -198,20 +253,12 @@ namespace aZero::RenderAPI
             m_LastBarrier.subresourceRange = desc.SubresourceRange;
         }
 
-        void Upload(const Core& core, CommandQueue& commandQueue, const CommandPool& commandPool, const Buffer& stagingBuffer, const UploadDesc& uploadDesc)
+        void Upload(Core& core, CommandQueue& commandQueue, CommandPool& commandPool, Buffer& stagingBuffer, const BufferToImageCopyDesc& uploadDesc)
         {
-            VkFenceCreateInfo fenceOneTimeCI{ .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
-            VkFence fenceOneTime{};
-            chkSucceed(vkCreateFence(core.GetLogicalDevice(), &fenceOneTimeCI, nullptr, &fenceOneTime));
-            VkCommandBuffer cbOneTime{};
-            VkCommandBufferAllocateInfo cbOneTimeAI{ .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO, .commandPool = commandPool.Get(), .commandBufferCount = 1};
-            chkSucceed(vkAllocateCommandBuffers(core.GetLogicalDevice(), &cbOneTimeAI, &cbOneTime));
+            RenderAPI::Fence fenceOneTime(core);
 
-            VkCommandBufferBeginInfo cbOneTimeBI{
-            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-            .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
-            };
-            chkSucceed(vkBeginCommandBuffer(cbOneTime, &cbOneTimeBI));
+            RenderAPI::CommandBuffer cbOneTime = commandPool.CreateCommandBuffers(core, 1)[0];
+            cbOneTime.StartRecording(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
 
             this->Transition({
                 .DstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
@@ -219,22 +266,9 @@ namespace aZero::RenderAPI
                 .NewLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                 .SubresourceRange = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = (uint32_t)uploadDesc.MipOffsets.size(), .layerCount = 1}
             });
+            cbOneTime.Barrier({}, { m_LastBarrier }, {});
 
-            VkDependencyInfo barrierTexInfo{
-                .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-                .imageMemoryBarrierCount = 1,
-                .pImageMemoryBarriers = &m_LastBarrier
-            };
-            vkCmdPipelineBarrier2(cbOneTime, &barrierTexInfo);
-            std::vector<VkBufferImageCopy> copyRegions{};
-            for (uint32_t j = 0; j < uploadDesc.MipOffsets.size(); j++) {
-                copyRegions.push_back({
-                    .bufferOffset = uploadDesc.MipOffsets[j],
-                    .imageSubresource{.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = j, .layerCount = 1},
-                    .imageExtent{.width = uploadDesc.BaseWidth >> j, .height = uploadDesc.BaseHeight >> j, .depth = uploadDesc.DepthOrArrayCount },
-                    });
-            }
-            vkCmdCopyBufferToImage(cbOneTime, stagingBuffer.Get(), m_Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, static_cast<uint32_t>(copyRegions.size()), copyRegions.data());
+            cbOneTime.Copy(uploadDesc, stagingBuffer, *this);
 
             this->Transition({
                 .DstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
@@ -242,21 +276,18 @@ namespace aZero::RenderAPI
                 .NewLayout = VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL,
                 .SubresourceRange = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = (uint32_t)uploadDesc.MipOffsets.size(), .layerCount = 1}
             });
-            barrierTexInfo.pImageMemoryBarriers = &m_LastBarrier;
-            vkCmdPipelineBarrier2(cbOneTime, &barrierTexInfo);
-            chkSucceed(vkEndCommandBuffer(cbOneTime));
+            cbOneTime.Barrier({}, { m_LastBarrier }, {});
 
-            VkCommandBufferSubmitInfo cbOneTimeSubmitInfo{
-                .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
-                .commandBuffer = cbOneTime
+            cbOneTime.StopRecording();
+
+            RenderAPI::CommandQueue::SubmitDesc submitDesc{
+            .CommandBufferPtr = &cbOneTime,
+            .OnCompletionFence = &fenceOneTime
             };
-            VkSubmitInfo2 oneTimeSI{
-                .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-                .commandBufferInfoCount = 1,
-                .pCommandBufferInfos = &cbOneTimeSubmitInfo
-            };
-            chkSucceed(vkQueueSubmit2(commandQueue.Get(), 1, &oneTimeSI, fenceOneTime));
-            chkSucceed(vkWaitForFences(core.GetLogicalDevice(), 1, &fenceOneTime, VK_TRUE, UINT64_MAX));
+
+            commandQueue.SubmitCommandBuffers(submitDesc);
+
+            fenceOneTime.WaitFor();
         }
 
         VkImage Get() const { return m_Image; }
@@ -265,30 +296,52 @@ namespace aZero::RenderAPI
         void OverrideInternalMemoryBarrier(const VkImageMemoryBarrier2& barrier) { m_LastBarrier = barrier; }
 
     private:
+        Core* m_diCore = nullptr;
         VkImage m_Image;
         VmaAllocation m_Allocation;
         Desc m_Desc;
         VkImageMemoryBarrier2 m_LastBarrier;
     };
 
-    class ImageView
+    class ImageView : public DeleteCopy
     {
     public:
         struct Desc
         {
-            const aZero::RenderAPI::Image* Image;
-            EImageAspect ImageAspect;
+            const aZero::RenderAPI::Image* Image = nullptr;
+            EImageAspect ImageAspect = (EImageAspect)0;
             uint32_t LayerStart = 0, LayerCount = 1u;
             uint32_t MipStart = 0, MipCount = 1u;
         };
 
         ImageView() = default;
-        ImageView(const Core& core, const Desc& desc)
+        ~ImageView()
+        {
+            if (m_diCore)
+            {
+                vkDestroyImageView(m_diCore->GetLogicalDevice(), m_View, nullptr);
+            }
+        }
+
+        ImageView(ImageView&& other) noexcept
+        {
+            *this = std::move(other);
+        }
+
+        ImageView& operator=(ImageView&& other) noexcept
+        {
+            std::swap(m_diCore, other.m_diCore);
+            std::swap(m_View, other.m_View);
+            std::swap(m_Desc, other.m_Desc);
+            return *this;
+        }
+
+        ImageView(Core& core, const Desc& desc)
         {
             this->Init(core, desc);
         }
 
-        void Init(const Core& core, const Desc& desc)
+        void Init(Core& core, const Desc& desc)
         {
             const Image::Desc& imageDesc = desc.Image->GetDesc();
 
@@ -301,11 +354,16 @@ namespace aZero::RenderAPI
             };
 
             chkSucceed(vkCreateImageView(core.GetLogicalDevice(), &viewCI, nullptr, &m_View));
+
+            m_diCore = &core;
+            m_Desc = desc;
         }
 
         VkImageView Get() const { return m_View; }
 
     private:
+        Core* m_diCore = nullptr;
         VkImageView m_View;
+        Desc m_Desc;
     };
 }

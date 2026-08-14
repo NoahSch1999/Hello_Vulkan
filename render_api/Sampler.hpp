@@ -5,7 +5,8 @@ namespace aZero::RenderAPI
 {
     enum class ESamplerMipMapMode { Nearest, Linear };
     enum class ESamplerFilterMode { Nearest, Linear, Cubic_Ext, Cubic_img };
-    class Sampler
+
+    class Sampler : public DeleteCopy
     {
     public:
         struct Desc
@@ -17,12 +18,33 @@ namespace aZero::RenderAPI
         };
 
         Sampler() = default;
-        Sampler(const Core& core, const Desc& desc)
+        ~Sampler()
+        {
+            if (m_diCore)
+            {
+                vkDestroySampler(m_diCore->GetLogicalDevice(), m_Sampler, nullptr);
+            }
+        }
+
+        Sampler(Sampler&& other) noexcept
+        {
+            *this = std::move(other);
+        }
+
+        Sampler& operator=(Sampler&& other) noexcept
+        {
+            std::swap(m_diCore, other.m_diCore);
+            std::swap(m_Sampler, other.m_Sampler);
+            std::swap(m_Desc, other.m_Desc);
+            return *this;
+        }
+
+        Sampler(Core& core, const Desc& desc)
         {
             this->Init(core, desc);
         }
 
-        void Init(const Core& core, const Desc& desc)
+        void Init(Core& core, const Desc& desc)
         {
             VkFilter filterMode =
                 desc.FilterMode == ESamplerFilterMode::Nearest ? VK_FILTER_NEAREST :
@@ -41,12 +63,14 @@ namespace aZero::RenderAPI
             };
 
             chkSucceed(vkCreateSampler(core.GetLogicalDevice(), &samplerCI, nullptr, &m_Sampler));
+            m_diCore = &core;
             m_Desc = desc;
         }
 
         VkSampler Get() const { return m_Sampler; }
 
     private:
+        RenderAPI::Core* m_diCore = nullptr;
         VkSampler m_Sampler;
         Desc m_Desc;
     };

@@ -23,7 +23,6 @@ namespace aZero::Package
 		};
 
 	public:
-
 		struct WriteData
 		{
 			std::vector<aZero::Asset::MeshletMeshData> MeshletMeshes;
@@ -50,6 +49,12 @@ namespace aZero::Package
 			std::tuple<AssetEntry<aZero::Asset::MeshletMeshData>, AssetEntry<aZero::Asset::ImageData>> AssetEntries;
 			std::vector<std::byte> Data;
 		};
+
+		AssetPackage() = default;
+		AssetPackage(const std::filesystem::path& path)
+		{
+			this->Unpack(path);
+		}
 
 		bool Pack(const std::filesystem::path& path, const WriteData& data, bool overwrite = true)
 		{
@@ -186,6 +191,12 @@ namespace aZero::Package
 			image.Data = aZero::File::ReadVector<std::byte>(data, offset);
 			image.MipLevels = aZero::File::ReadVector<aZero::Asset::ImageData::Mip>(data, offset);
 
+			std::memcpy(&image.BaseWidth, &data[offset], sizeof(image.BaseWidth));
+			offset += sizeof(image.BaseWidth);
+
+			std::memcpy(&image.BaseHeight, &data[offset], sizeof(image.BaseHeight));
+			offset += sizeof(image.BaseHeight);
+
 			std::memcpy(&image.FaceCount, &data[offset], sizeof(image.FaceCount));
 			offset += sizeof(image.FaceCount);
 
@@ -205,6 +216,9 @@ namespace aZero::Package
 			aZero::File::WriteVector(image.Data, file);
 			aZero::File::WriteVector(image.MipLevels, file);
 
+			file.write(reinterpret_cast<const char*>(&image.BaseWidth), sizeof(image.BaseWidth));
+			file.write(reinterpret_cast<const char*>(&image.BaseHeight), sizeof(image.BaseHeight));
+
 			file.write(reinterpret_cast<const char*>(&image.FaceCount), sizeof(image.FaceCount));
 			file.write(reinterpret_cast<const char*>(&image.DepthOrArrayCount), sizeof(image.DepthOrArrayCount));
 
@@ -221,7 +235,7 @@ namespace aZero::Package
 			uint64_t offset = baseOffset;
 			ReadBase(data, offset, mesh.Name, mesh.UUID);
 			mesh.Meshlets = aZero::File::ReadVector<aZero::Asset::Meshlet>(data, offset);
-			mesh.MeshletBounds = aZero::File::ReadVector<DirectX::BoundingSphere>(data, offset);
+			mesh.MeshletBounds = aZero::File::ReadVector<BoundingVolume::BoundingSphere>(data, offset);
 			mesh.Vertices = aZero::File::ReadVector<aZero::Asset::Vertex>(data, offset);
 			mesh.Submeshes = aZero::File::ReadVector<aZero::Asset::MeshletSubMesh>(data, offset);
 		}

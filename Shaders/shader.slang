@@ -16,6 +16,8 @@ SamplerState aaaa[2];
 
 struct PushConstants
 {
+    [[vk::offset(0)]]
+    float idk;
     uint64_t address;
 };
 
@@ -85,10 +87,3 @@ VSOutput vsMain(VSInput input, uint instanceIndex : SV_VulkanInstanceID) {
 
     return output;
 }
-
-//[shader("fragment")]
-//float4 main(VSOutput input) {
-//    return float4(textures[0].Sample(input.UV).rgb, 1.0);
-//    //return float4((input.Normal + 1) * 0.5, 1.0);
-//    //return float4(input.UV, 0.0, 1.0);
-//}

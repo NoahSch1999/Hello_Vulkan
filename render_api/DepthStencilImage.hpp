@@ -3,7 +3,7 @@
 
 namespace aZero::RenderAPI
 {
-    class DepthStencilImage
+    class DepthStencilImage : public DeleteCopy
     {
     public:
         struct Desc
@@ -12,13 +12,22 @@ namespace aZero::RenderAPI
         };
 
         DepthStencilImage() = default;
+        DepthStencilImage(DepthStencilImage&& other) noexcept
+        {
+            *this = std::move(other);
+        }
+        DepthStencilImage& operator=(DepthStencilImage&& other) noexcept
+        {
+            std::swap(m_Image, other.m_Image);
+            return *this;
+        }
 
-        DepthStencilImage(const Core& core, const Desc& desc)
+        DepthStencilImage(Core& core, const Desc& desc)
         {
             this->Init(core, desc);
         }
 
-        void Init(const Core& core, const Desc& desc)
+        void Init(Core& core, const Desc& desc)
         {
             std::vector<VkFormat> depthFormats{ VK_FORMAT_D24_UNORM_S8_UINT };
             VkFormat depthFormat{ VK_FORMAT_UNDEFINED };
@@ -41,7 +50,7 @@ namespace aZero::RenderAPI
             RenderAPI::Image::Desc imageDesc{
                 .Format = RenderAPI::EImageFormat::D24S8_UINT,
                 .Type = RenderAPI::EImageType::Image2D,
-                .Usage = RenderAPI::EImageUsageFlags::DepthStencil_Attachment,
+                .Usage = RenderAPI::EImageUsageBits::DepthStencil_Attachment,
                 .Width = desc.Width, .Height = desc.Height, .Depth = 1u, .MipCount = 1u, .ArrayLayers = 1u
             };
 

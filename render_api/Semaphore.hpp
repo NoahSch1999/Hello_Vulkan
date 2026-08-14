@@ -4,10 +4,33 @@
 namespace aZero::RenderAPI
 {
     enum class ESemaphoreType { Binary, Timeline };
-    class Semaphore
+
+    class Semaphore : public DeleteCopy
     {
     public:
         Semaphore() = default;
+        ~Semaphore()
+        {
+            if (m_diCore)
+            {
+                vkDestroySemaphore(m_diCore->GetLogicalDevice(), m_Semaphore, nullptr);
+            }
+        }
+
+        Semaphore(Semaphore&& other) noexcept
+        {
+            *this = std::move(other);
+        }
+
+        Semaphore& operator=(Semaphore&& other) noexcept
+        {
+            std::swap(m_diCore, other.m_diCore);
+            std::swap(m_Semaphore, other.m_Semaphore);
+            std::swap(m_Type, other.m_Type);
+            std::swap(m_LastSignal, other.m_LastSignal);
+            return *this;
+        }
+
         Semaphore(Core& core, ESemaphoreType type)
         {
             this->Init(core, type);
