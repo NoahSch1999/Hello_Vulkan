@@ -139,6 +139,17 @@ namespace aZero::RenderAPI
                 }
             }
 
+            std::cout << desc.Name << ":\n";
+            VkMemoryPropertyFlags props{};
+            vmaGetAllocationMemoryProperties(
+                core.GetVmaAllocator(),
+                m_Allocation,
+                &props
+            );
+
+            printf("memory props: 0x%x\n", props);
+            printf("mapped: %p\n", m_AllocationInfo.pMappedData);
+
             m_Desc = desc;
             m_diCore = &core;
         }

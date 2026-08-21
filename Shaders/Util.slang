@@ -90,9 +90,10 @@ float2 UnpackUV16(uint2 p)
     return p / 65535.0;
 }
 
-float2 Unpack32ToHalfFloats(uint p)
+float2 Unpack32ToHalfFloats(uint32_t p)
 {
     return float2(f16tof32(p & 0xFFFF), f16tof32(p >> 16));
 }
 
 #endif
+

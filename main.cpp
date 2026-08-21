@@ -115,7 +115,6 @@ private:
     }
 };
 
-aZero::Asset::LegacyMeshData meshData;
 aZero::Asset::MeshletMeshData meshletMeshData;
 aZero::Asset::ImageData imageData;
 bool LoadAssets(const std::filesystem::path& path)
@@ -152,9 +151,12 @@ bool LoadAssets(const std::filesystem::path& path)
         return false;
     }
 
-    meshData = aZero::File::ExtractGltfLegacyMesh(asset->meshes[0], asset);
-    meshletMeshData = aZero::File::ExtractGltfMeshletMesh(asset->meshes[0], asset);
-    imageData = aZero::File::ExtractGltfImage(asset->images[0], asset, path);
+   /* meshData = aZero::File::ExtractGltfLegacyMesh(asset->meshes[0], asset);
+    meshletMeshData = aZero::File::ExtractGltfMeshletMesh(asset->meshes[1], asset);
+    imageData = aZero::File::ExtractGltfImage(asset->images[2], asset, path);*/
+
+    meshletMeshData = aZero::File::ExtractGltfMeshletMesh(asset->meshes[1], asset);
+    imageData = aZero::File::ExtractGltfImage(asset->images[1], asset, path);
     return true;
 }
 
@@ -162,16 +164,17 @@ int main()
 {
     using namespace aZero;
 
-    bool loaded = LoadAssets("C:/Projects/Programming/Hello_Vulkan/KtxCube.gltf");
+    bool loaded = LoadAssets("C:/Coding/aZeroEditor/content/scenes/TEST2.gltf");
+    //bool loaded = LoadAssets("C:/Coding/Hello_Vulkan/KtxCube.gltf");
+    //bool loaded = LoadAssets("C:/Coding/Hello_Vulkan/Soldier.gltf");
     if (!loaded) {
         std::cout << "Failed to load assets\n";
         exit(-1);
     }
 
-    Package::AssetPackage assetPac("C:/Projects/Programming/Hello_Vulkan/MyPac.pac");
+    //Package::AssetPackage assetPac("C:/Coding/Hello_Vulkan/MyPac.pac");
 
-    aZero::Asset::MeshletMeshData meshletMeshDataTemp = assetPac.GetAsset<aZero::Asset::MeshletMeshData>(0);
-    imageData = assetPac.GetAsset<aZero::Asset::ImageData>(0);
+    //imageData = assetPac.GetAsset<aZero::Asset::ImageData>(0);
 
     aZero::Window::Init(SDL_INIT_VIDEO);
 
@@ -217,9 +220,9 @@ int main()
 
     Compiler::CompilerSession session = compiler.CreateSession(d).value();
 
-    Compiler::ShaderModule moduleTaskShaderPass = session.LoadModule("C:/Projects/Programming/Hello_Vulkan/Shaders/IA_Pipeline/Geo_TaskShader.slang").value();
-    Compiler::ShaderModule moduleMeshShaderPass = session.LoadModule("C:/Projects/Programming/Hello_Vulkan/Shaders/IA_Pipeline/Geo_MeshShader.slang").value();
-    Compiler::ShaderModule modulePixelShaderPass = session.LoadModule("C:/Projects/Programming/Hello_Vulkan/Shaders/IA_Pipeline/Geo_PixelShader.slang").value();
+    Compiler::ShaderModule moduleTaskShaderPass = session.LoadModule("C:/Coding/Hello_Vulkan/Shaders/IA_Pipeline/Geo_TaskShader.slang").value();
+    Compiler::ShaderModule moduleMeshShaderPass = session.LoadModule("C:/Coding/Hello_Vulkan/Shaders/IA_Pipeline/Geo_MeshShader.slang").value();
+    Compiler::ShaderModule modulePixelShaderPass = session.LoadModule("C:/Coding/Hello_Vulkan/Shaders/IA_Pipeline/Geo_PixelShader.slang").value();
 
     Compiler::ShaderProgram::MeshletDesc msProgramDesc{
         .EntryPoints = {"asMain", "msMain", "psMain"},
@@ -227,7 +230,7 @@ int main()
     };
     Compiler::ShaderProgram msProgram(msProgramDesc);
 
-    Compiler::ShaderModule module = session.LoadModule("C:/Projects/Programming/Hello_Vulkan/Shaders/pixel.slang").value();
+    Compiler::ShaderModule module = session.LoadModule("C:/Coding/Hello_Vulkan/Shaders/pixel.slang").value();
     Compiler::ShaderProgram::VertexDesc vsProgramDesc{
         .EntryPoints = {"vsMain", "psMain"},
         .Modules = {&module}
@@ -273,18 +276,6 @@ int main()
     window.m_Swapchain = &swapchain;
     window.m_DsImage = &depthImage;
     window.m_Dsv = &depthImageView;
-
-    RenderAPI::Buffer::Desc vBufferDesc{
-        .Size = sizeof(aZero::Asset::Vertex) * meshData.Vertices.size() + sizeof(aZero::Asset::VertexIndex) * meshData.Indices.size(),
-        .UsageBits = RenderAPI::EBufferUsageBits::Vertex | RenderAPI::EBufferUsageBits::Index,
-        .MemoryType = RenderAPI::EMemoryType::BestFit,
-        .SeperateHeap = false
-    };
-
-    RenderAPI::Buffer vBuffer(core, vBufferDesc);
-
-    vBuffer.Upload(meshData.Vertices.data(), sizeof(aZero::Asset::Vertex) * meshData.Vertices.size(), 0);
-    vBuffer.Upload(meshData.Indices.data(), sizeof(aZero::Asset::VertexIndex) * meshData.Indices.size(), sizeof(aZero::Asset::Vertex) * meshData.Vertices.size());
 
     struct ShaderData {
         glm::mat4 projection;
@@ -401,6 +392,7 @@ int main()
     mspDesc.Program = &msProgram;
     mspDesc.DepthDesc = Pipeline::RenderPass::Desc::DepthStencil();
     mspDesc.RenderTargetFormats = { VK_FORMAT_B8G8R8A8_SRGB };
+    mspDesc.RasterDesc.CullMode = VkCullModeFlagBits::VK_CULL_MODE_NONE;
     msRenderPass.Compile(mspDesc);
 
     uint64_t lastTime{ SDL_GetTicks() };
@@ -420,7 +412,7 @@ int main()
     RenderAPI::Buffer meshletBuffer, cameraBuffer, meshletBoundsBuffer, vertexBuffer, materialBuffer;
     {
         RenderAPI::Buffer::Desc passBufferDesc{
-            .Size = sizeof(1024 * 1024),
+            .Size = 1024 * 1024,
             .UsageBits = RenderAPI::EBufferUsageBits::DeviceAddress,
             .MemoryType = RenderAPI::EMemoryType::BestFit,
             .SeperateHeap = false
@@ -437,6 +429,8 @@ int main()
         materialBuffer = RenderAPI::Buffer(core, passBufferDesc);
     }
 
+    /*aZero::Asset::MeshletMeshData meshcope = meshletMeshData;
+    for()*/
     meshletBuffer.Upload(meshletMeshData.Meshlets, 0);
     meshletBoundsBuffer.Upload(meshletMeshData.MeshletBounds, 0);
     vertexBuffer.Upload(meshletMeshData.Vertices, 0);
@@ -451,9 +445,30 @@ int main()
         uint32_t TransparencyMap;
     };
     PBRMaterial material{
-        .AlbedoTexture = 0xffffffff
+        .AlbedoTexture = 0
     };
     materialBuffer.Upload(material, 0);
+
+    PushConstants constants{
+                        .IA_Args = {
+                            .GlobalMeshletOffset = 0,
+                            .GlobalVertexOffset = 0,
+                            .MaterialIndex = 0,
+                            .MeshletCount = (uint32_t)meshletMeshData.Meshlets.size()
+                        },
+                        .CameraAddress = (uint64_t)cameraBuffer.GetDeviceAddress().value() + frameIndex * sizeof(CameraData),
+                        .MeshletBoundBufferAddress = (uint64_t)meshletBoundsBuffer.GetDeviceAddress().value(),
+                        .MeshletBufferAddress = (uint64_t)meshletBuffer.GetDeviceAddress().value(),
+                        .VertexBufferAddress = (uint64_t)vertexBuffer.GetDeviceAddress().value(),
+                        .MaterialBufferAddress = (uint64_t)materialBuffer.GetDeviceAddress().value(),
+                        .RenderMode = 0u
+    };
+
+    std::cout << "CameraAddress: " << (uint64_t)cameraBuffer.GetDeviceAddress().value() << "\n";
+    std::cout << "MeshletBoundBufferAddress: " << (uint64_t)meshletBoundsBuffer.GetDeviceAddress().value() << "\n";
+    std::cout << "MeshletBufferAddress: " << (uint64_t)meshletBuffer.GetDeviceAddress().value() << "\n";
+    std::cout << "VertexBufferAddress: " << (uint64_t)vertexBuffer.GetDeviceAddress().value() << "\n";
+    std::cout << "MaterialBufferAddress: " << (uint64_t)materialBuffer.GetDeviceAddress().value() << "\n";
 
     while (window.IsOpen())
     {
@@ -467,19 +482,45 @@ int main()
         swapchain.NextFrame(frameIndex);
 
         // Update shader data
-        shaderData.projection = glm::perspective(glm::radians(45.0f), (float)window.GetClientDimensions()[0] / (float)window.GetClientDimensions()[1], 0.1f, 32.0f);
+        if (GetAsyncKeyState('W'))
+        {
+            camPos.z += 0.001f;
+        }
+        if (GetAsyncKeyState('S'))
+        {
+            camPos.z -= 0.001f;
+        }
+        if (GetAsyncKeyState('A'))
+        {
+            camPos.x += 0.001f;
+        }
+        if (GetAsyncKeyState('D'))
+        {
+            camPos.x -= 0.001f;
+        }
+        if (GetAsyncKeyState(VK_SPACE))
+        {
+            camPos.y += 0.001f;
+        }
+        if (GetAsyncKeyState(VK_LCONTROL))
+        {
+            camPos.y -= 0.001f;
+        }
+
+        shaderData.projection = glm::perspective(glm::radians(45.0f), (float)window.GetClientDimensions()[0] / (float)window.GetClientDimensions()[1], 0.1f, 1000.0f);
         shaderData.view = glm::translate(glm::mat4(1.0f), camPos);
 
         CameraData cameraData{
             .ViewMatrix = shaderData.view,
-            .ViewProjectionMatrix = shaderData.view * shaderData.projection
+            .ViewProjectionMatrix = shaderData.projection * shaderData.view
         };
         cameraBuffer.Upload(cameraData, frameIndex * sizeof(CameraData));
 
         for (auto i = 0; i < 3; i++) {
-            auto instancePos = glm::vec3((float)(i - 1) * 3.0f, 0.0f, 0.0f);
+            auto instancePos = glm::vec3(0, 0, 1.0f * i);
             shaderData.model[i] = glm::translate(glm::mat4(1.0f), instancePos) * glm::mat4_cast(glm::quat(objectRotations[i]));
         }
+        
         shaderDataBuffers[frameIndex].Upload(&shaderData, sizeof(ShaderData), 0);
 
         // Record command buffer
@@ -524,6 +565,8 @@ int main()
                     
                     // since we made them dynamic when creating the pipeline we overwrite them here
                     VkViewport vp{
+                        .x = 0.f,
+                        .y = 0.f,
                         .width = static_cast<float>(window.GetClientDimensions()[0]),
                         .height = static_cast<float>(window.GetClientDimensions()[1]),
                         .minDepth = 0.0f,
@@ -531,25 +574,33 @@ int main()
                     };
                     VkRect2D scissor{.extent{.width = static_cast<uint32_t>(window.GetClientDimensions()[0]), .height = static_cast<uint32_t>(window.GetClientDimensions()[1]) } };
                     cb.SetScizzorRectsAndViewports({ vp }, { scissor });
-
-                    PushConstants constants{
-                        .IA_Args = {
-                            .Instance = shaderData.model[0],
-                            .GlobalMeshletOffset = 0,
-                            .GlobalVertexOffset = 0,
-                            .MaterialIndex = 0,
-                            .MeshletCount = (uint32_t)meshletMeshData.Meshlets.size()
-                        },
-                        .CameraAddress = (uint32_t)cameraBuffer.GetDeviceAddress().value() + frameIndex * sizeof(CameraData),
-                        .MeshletBoundBufferAddress = (uint32_t)meshletBoundsBuffer.GetDeviceAddress().value(),
-                        .MeshletBufferAddress = (uint32_t)meshletBuffer.GetDeviceAddress().value(),
-                        .VertexBufferAddress = (uint32_t)vertexBuffer.GetDeviceAddress().value(),
-                        .MaterialBufferAddress = (uint32_t)materialBuffer.GetDeviceAddress().value(),
-                        .RenderMode = 0u
-                    };
                     auto constantsBlock = pass.GetPushConstantBlock("Constants");
+
+                    constants.IA_Args.Instance = shaderData.model[0];
                     cb.SetPushConstants(constantsBlock, constants);
                     cb.DispatchMesh(meshletMeshData.Meshlets.size(), 1, 1);
+
+                    int i = 0;
+                    for (auto& submesh : meshletMeshData.Submeshes)
+                    {
+                        constants.IA_Args.GlobalMeshletOffset = submesh.MeshletOffset;
+                        constants.IA_Args.GlobalVertexOffset = 0;
+                        constants.IA_Args.MeshletCount = submesh.MeshletCount;
+                        constants.IA_Args.Instance = shaderData.model[0];
+
+                        cb.SetPushConstants(constantsBlock, constants);
+                        cb.DispatchMesh(submesh.MeshletCount, 1, 1);
+                        i++;
+                    }
+
+                   /* constants.IA_Args.Instance = shaderData.model[1];
+                    cb.SetPushConstants(constantsBlock, constants);
+                    cb.DispatchMesh(meshletMeshData.Meshlets.size(), 1, 1);
+
+                    constants.IA_Args.Instance = shaderData.model[2];
+                    cb.SetPushConstants(constantsBlock, constants);
+                    cb.DispatchMesh(meshletMeshData.Meshlets.size(), 1, 1);*/
+
                     /*cb.SetVertexBuffer(vBuffer, 0);
                     cb.SetIndexBuffer(vBuffer, sizeof(aZero::Asset::Vertex) * meshData.Vertices.size());
 

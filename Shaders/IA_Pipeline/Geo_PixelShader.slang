@@ -23,12 +23,9 @@ Output psMain(RasterVertex pin)
 {
     Output output;
 
-    output.color = Textures[0].Sample(pin.UV);
-    return output;
+    PBRMaterial* materialBuffer = (PBRMaterial*)Constants.MaterialBufferAddress;
 
-    StructuredBuffer<PBRMaterial> *materialBuffer = (StructuredBuffer<PBRMaterial> *)Constants.MaterialBufferAddress;
-
-    PBRMaterial material = materialBuffer.Load(Constants.IA_Args.MaterialIndex);
+    PBRMaterial material = materialBuffer[Constants.IA_Args.MaterialIndex];
 
     if (material.AlbedoTexture == 0xffffffff)
     {

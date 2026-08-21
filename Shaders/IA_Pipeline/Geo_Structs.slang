@@ -27,16 +27,16 @@ struct RasterVertex
 struct MeshVertex
 {
     float3 Position;
-    uint UV;
-    uint Normal;
+    uint32_t UV;
+    uint32_t Normal;
 };
 
 struct Meshlet
 {
-    uint VertexOffset;
-    uint VertexCount;
-    uint PrimitiveCount;
-    uint Primitives[g_PrimitivesPerMeshlet];
+    uint32_t VertexOffset;
+    uint32_t VertexCount;
+    uint32_t PrimitiveCount;
+    uint32_t Primitives[g_PrimitivesPerMeshlet];
 };
 
 // GPU_Drive_Structs.hpp MIRROR
@@ -50,7 +50,7 @@ struct CameraData
 
 struct IndirectArgumentCounter
 {
-    uint Count;
+    uint32_t Count;
 };
 
 struct InstanceData
@@ -61,43 +61,43 @@ struct InstanceData
 struct IndirectArgumentConstantData
 {
     float4x4 Instance;
-    uint GlobalMeshletOffset;
-    uint GlobalVertexOffset;
-    uint MaterialIndex;
-    uint MeshletCount;
+    uint32_t GlobalMeshletOffset;
+    uint32_t GlobalVertexOffset;
+    uint32_t MaterialIndex;
+    uint32_t MeshletCount;
 };
 
 struct ObjectCullData
 {
     BoundingSphere Bounds;
-    uint InstanceDataIndex;
-    uint GlobalMeshletOffset;
-    uint GlobalVertexOffset;
-    uint MeshletCount;
-    uint MaterialIndex;
+    uint32_t InstanceDataIndex;
+    uint32_t GlobalMeshletOffset;
+    uint32_t GlobalVertexOffset;
+    uint32_t MeshletCount;
+    uint32_t MaterialIndex;
 };
 
 struct MeshCullConstantsData
 {
-    uint MeshInstanceCount;
+    uint32_t MeshInstanceCount;
     uint3 Pad;
 };
 
 struct IndirectArguments
 {
     IndirectArgumentConstantData Data;
-    uint GroupX;
-    uint GroupY;
-    uint GroupZ;
+    uint32_t GroupX;
+    uint32_t GroupY;
+    uint32_t GroupZ;
 };
 
 struct PhongPixelConstantData
 {
-    uint SamplerIndex;
-    uint MaterialBuffer;
-    uint PointLightBuffer;
-    uint SpotLightBuffer;
-    uint DirectionalLightBuffer;
+    uint32_t SamplerIndex;
+    uint32_t MaterialBuffer;
+    uint32_t PointLightBuffer;
+    uint32_t SpotLightBuffer;
+    uint32_t DirectionalLightBuffer;
     float Time;
 };
 

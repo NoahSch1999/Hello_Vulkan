@@ -12,8 +12,8 @@ namespace aZero::Asset
 	struct Vertex
 	{
 		glm::vec3 Position;
-		uint32_t Normal;
 		uint32_t UV;
+		uint32_t Normal;
 	};
 
 	using VertexIndex = std::uint32_t; // For use with index buffers
