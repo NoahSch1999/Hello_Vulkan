@@ -1,6 +1,7 @@
 #pragma once
 #include "Core.hpp"
 #include <optional>
+#include <type_traits>
 
 namespace aZero::RenderAPI
 {
@@ -12,6 +13,17 @@ namespace aZero::RenderAPI
         return static_cast<EBufferUsageBits>(
             static_cast<std::uint32_t>(lhs) |
             static_cast<std::uint32_t>(rhs));
+    }
+
+    constexpr EBufferUsageBits& operator|=(EBufferUsageBits& lhs, EBufferUsageBits rhs)
+    {
+        using T = std::underlying_type_t<EBufferUsageBits>;
+
+        lhs = static_cast<EBufferUsageBits>(
+            static_cast<T>(lhs) | static_cast<T>(rhs)
+            );
+
+        return lhs;
     }
 
     inline VmaMemoryUsage ToVmaMemoryType(EMemoryType type)
@@ -139,7 +151,7 @@ namespace aZero::RenderAPI
                 }
             }
 
-            std::cout << desc.Name << ":\n";
+            /*std::cout << desc.Name << ":\n";
             VkMemoryPropertyFlags props{};
             vmaGetAllocationMemoryProperties(
                 core.GetVmaAllocator(),
@@ -148,7 +160,7 @@ namespace aZero::RenderAPI
             );
 
             printf("memory props: 0x%x\n", props);
-            printf("mapped: %p\n", m_AllocationInfo.pMappedData);
+            printf("mapped: %p\n", m_AllocationInfo.pMappedData);*/
 
             m_Desc = desc;
             m_diCore = &core;

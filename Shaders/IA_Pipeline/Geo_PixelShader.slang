@@ -35,6 +35,9 @@ Output psMain(RasterVertex pin)
 
     float3 sampledAlbedo = Textures[material.AlbedoTexture].Sample(pin.UV).xyz;
 
+    output.color = float4(pin.Color, 1);
+    return output;
+
     float3 fragmentNormal;
     if (material.NormalMap == 0xffffffff)
     {
@@ -52,15 +55,8 @@ Output psMain(RasterVertex pin)
         fragmentNormal = normalize(mul(fragmentNormal, TBN));
     }
 
-    if (Constants.RenderMode == RENDER_MODE_LIT)
+    if (Constants.RenderMode != RENDER_MODE_LIT)
     {
-        // todo Normal pass calculations
-        output.color = float4(sampledAlbedo, 1.f);
-        return output;
-    }
-    else
-    {
-
         // -------------------------------   DEBUG ALBEDO   -------------------------------------------
         if (Constants.RenderMode == RENDER_MODE_UNLIT)
         {
@@ -124,5 +120,7 @@ Output psMain(RasterVertex pin)
         // --------------------------------------------------------------------------------------------
     }
 
+    // todo Normal pass calculations
+    output.color = float4(sampledAlbedo, 1.f);
     return output;
 }

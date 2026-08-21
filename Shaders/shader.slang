@@ -17,7 +17,6 @@ SamplerState aaaa[2];
 struct PushConstants
 {
     [[vk::offset(0)]]
-    float idk;
     uint64_t address;
 };
 

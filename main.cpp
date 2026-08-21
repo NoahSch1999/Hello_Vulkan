@@ -116,6 +116,7 @@ private:
 };
 
 aZero::Asset::MeshletMeshData meshletMeshData;
+aZero::Asset::LegacyMeshData legacyMeshData;
 aZero::Asset::ImageData imageData;
 bool LoadAssets(const std::filesystem::path& path)
 {
@@ -155,6 +156,7 @@ bool LoadAssets(const std::filesystem::path& path)
     meshletMeshData = aZero::File::ExtractGltfMeshletMesh(asset->meshes[1], asset);
     imageData = aZero::File::ExtractGltfImage(asset->images[2], asset, path);*/
 
+    legacyMeshData = aZero::File::ExtractGltfLegacyMesh(asset->meshes[1], asset);
     meshletMeshData = aZero::File::ExtractGltfMeshletMesh(asset->meshes[1], asset);
     imageData = aZero::File::ExtractGltfImage(asset->images[1], asset, path);
     return true;
@@ -217,7 +219,7 @@ int main()
         }
         });
     d.PreprocessorMacros.push_back({ "HELLO", "" });
-
+    
     Compiler::CompilerSession session = compiler.CreateSession(d).value();
 
     Compiler::ShaderModule moduleTaskShaderPass = session.LoadModule("C:/Coding/Hello_Vulkan/Shaders/IA_Pipeline/Geo_TaskShader.slang").value();
@@ -235,7 +237,7 @@ int main()
         .EntryPoints = {"vsMain", "psMain"},
         .Modules = {&module}
     };
-    Compiler::ShaderProgram program(vsProgramDesc);
+    Compiler::ShaderProgram vsProgram(vsProgramDesc);
 
     // ----------------------------------------------------------------------------------------------------
 
@@ -375,7 +377,7 @@ int main()
     // vs pass
     Pipeline::RenderPass renderPass(core);
     Pipeline::RenderPass::VertexPassDesc vpDesc;
-    vpDesc.Program = &program;
+    vpDesc.Program = &vsProgram;
     vpDesc.DepthDesc = Pipeline::RenderPass::Desc::DepthStencil();
     vpDesc.RenderTargetFormats = { VK_FORMAT_B8G8R8A8_SRGB };
     Pipeline::RenderPass::VertexPassDesc::VertexBinding vBinding{
@@ -409,7 +411,7 @@ int main()
                 .SubresourceRange{.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT, .levelCount = 1, .layerCount = 1 }
     });
 
-    RenderAPI::Buffer meshletBuffer, cameraBuffer, meshletBoundsBuffer, vertexBuffer, materialBuffer;
+    RenderAPI::Buffer meshletBuffer, cameraBuffer, meshletBoundsBuffer, vertexBuffer, materialBuffer, vbibBuffer;
     {
         RenderAPI::Buffer::Desc passBufferDesc{
             .Size = 1024 * 1024,
@@ -427,13 +429,19 @@ int main()
         vertexBuffer = RenderAPI::Buffer(core, passBufferDesc);
         passBufferDesc.Name = "materialBuffer";
         materialBuffer = RenderAPI::Buffer(core, passBufferDesc);
+
+        passBufferDesc.UsageBits |= RenderAPI::EBufferUsageBits::Vertex;
+        passBufferDesc.UsageBits |= RenderAPI::EBufferUsageBits::Index;
+        passBufferDesc.Name = "vbibBuffer";
+        vbibBuffer = RenderAPI::Buffer(core, passBufferDesc);
     }
 
-    /*aZero::Asset::MeshletMeshData meshcope = meshletMeshData;
-    for()*/
     meshletBuffer.Upload(meshletMeshData.Meshlets, 0);
     meshletBoundsBuffer.Upload(meshletMeshData.MeshletBounds, 0);
     vertexBuffer.Upload(meshletMeshData.Vertices, 0);
+
+    vbibBuffer.Upload(legacyMeshData.Vertices, 0);
+    vbibBuffer.Upload(legacyMeshData.Indices, legacyMeshData.Vertices.size() * sizeof(legacyMeshData.Vertices[0]));
 
     struct PBRMaterial
     {
@@ -463,12 +471,6 @@ int main()
                         .MaterialBufferAddress = (uint64_t)materialBuffer.GetDeviceAddress().value(),
                         .RenderMode = 0u
     };
-
-    std::cout << "CameraAddress: " << (uint64_t)cameraBuffer.GetDeviceAddress().value() << "\n";
-    std::cout << "MeshletBoundBufferAddress: " << (uint64_t)meshletBoundsBuffer.GetDeviceAddress().value() << "\n";
-    std::cout << "MeshletBufferAddress: " << (uint64_t)meshletBuffer.GetDeviceAddress().value() << "\n";
-    std::cout << "VertexBufferAddress: " << (uint64_t)vertexBuffer.GetDeviceAddress().value() << "\n";
-    std::cout << "MaterialBufferAddress: " << (uint64_t)materialBuffer.GetDeviceAddress().value() << "\n";
 
     while (window.IsOpen())
     {
@@ -553,7 +555,7 @@ int main()
 
         cb.Barrier({}, { outputBarriers[0], outputBarriers[1] }, {});
 
-        msRenderPass.Render(
+        renderPass.Render(
             cb,
             {
                 .ColorTargets = {{.View = swapchain.GetCurrentBackBufferView() }},
@@ -574,12 +576,10 @@ int main()
                     };
                     VkRect2D scissor{.extent{.width = static_cast<uint32_t>(window.GetClientDimensions()[0]), .height = static_cast<uint32_t>(window.GetClientDimensions()[1]) } };
                     cb.SetScizzorRectsAndViewports({ vp }, { scissor });
+                    /*
                     auto constantsBlock = pass.GetPushConstantBlock("Constants");
 
                     constants.IA_Args.Instance = shaderData.model[0];
-                    cb.SetPushConstants(constantsBlock, constants);
-                    cb.DispatchMesh(meshletMeshData.Meshlets.size(), 1, 1);
-
                     int i = 0;
                     for (auto& submesh : meshletMeshData.Submeshes)
                     {
@@ -591,27 +591,22 @@ int main()
                         cb.SetPushConstants(constantsBlock, constants);
                         cb.DispatchMesh(submesh.MeshletCount, 1, 1);
                         i++;
+                    }*/
+
+                    for (auto& submesh : legacyMeshData.Submeshes)
+                    {
+                        cb.SetVertexBuffer(vbibBuffer, 0);
+                        cb.SetIndexBuffer(vbibBuffer, sizeof(legacyMeshData.Vertices[0]) * legacyMeshData.Vertices.size());
+
+                        auto pushconst = shaderDataBuffers[frameIndex].GetDeviceAddress().value();
+                        auto pcBinding = pass.GetPushConstantBinding("pc", "address");
+                        cb.SetPushConstants(pcBinding, pushconst);
+
+                        auto pcBindingFrag = pass.GetPushConstantBinding("pc", "idk");
+                        cb.SetPushConstants(pcBindingFrag, 0.2f);
+
+                        cb.DrawIndexed(submesh.IndexCount, 1, submesh.IndexOffset, 0, 0);
                     }
-
-                   /* constants.IA_Args.Instance = shaderData.model[1];
-                    cb.SetPushConstants(constantsBlock, constants);
-                    cb.DispatchMesh(meshletMeshData.Meshlets.size(), 1, 1);
-
-                    constants.IA_Args.Instance = shaderData.model[2];
-                    cb.SetPushConstants(constantsBlock, constants);
-                    cb.DispatchMesh(meshletMeshData.Meshlets.size(), 1, 1);*/
-
-                    /*cb.SetVertexBuffer(vBuffer, 0);
-                    cb.SetIndexBuffer(vBuffer, sizeof(aZero::Asset::Vertex) * meshData.Vertices.size());
-
-                    auto pushconst = shaderDataBuffers[frameIndex].GetDeviceAddress().value();
-                    auto pcBinding = pass.GetPushConstantBinding("pc", "address");
-                    cb.SetPushConstants(pcBinding, pushconst);
-
-                    auto pcBindingFrag = pass.GetPushConstantBinding("pc", "idk");
-                    cb.SetPushConstants(pcBindingFrag, 0.2f);
-
-                    cb.DrawIndexed((uint32_t)meshData.Indices.size(), 3, 0, 0, 0);*/
                 }
             }
         );

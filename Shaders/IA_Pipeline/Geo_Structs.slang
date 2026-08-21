@@ -21,7 +21,8 @@ struct RasterVertex
     float3 WorldPosition : WORLD_POSITION;
     float2 UV : UV;
     float3 Normal : NORMAL;
-    float3 Meshletid : meshletid;
+    float3 Meshletid : MESHLET_ID;
+    float3 Color : COLOR;
 };
 
 struct MeshVertex
@@ -38,8 +39,6 @@ struct Meshlet
     uint32_t PrimitiveCount;
     uint32_t Primitives[g_PrimitivesPerMeshlet];
 };
-
-// GPU_Drive_Structs.hpp MIRROR
 
 struct CameraData
 {
