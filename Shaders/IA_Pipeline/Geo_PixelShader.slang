@@ -35,9 +35,6 @@ Output psMain(RasterVertex pin)
 
     float3 sampledAlbedo = Textures[material.AlbedoTexture].Sample(pin.UV).xyz;
 
-    output.color = float4(pin.Color, 1);
-    return output;
-
     float3 fragmentNormal;
     if (material.NormalMap == 0xffffffff)
     {

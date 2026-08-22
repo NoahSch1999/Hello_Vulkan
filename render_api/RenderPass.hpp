@@ -159,7 +159,7 @@ namespace aZero::Pipeline
             renderingInfo.pColorAttachments = colorAttachments.data();
 
             VkRenderingAttachmentInfo depthAttachmentInfo;
-            if (!m_HasDepthStencilTarget && renderDesc.DepthTarget.View)
+            if (m_HasDepthStencilTarget && renderDesc.DepthTarget.View)
             {
                 depthAttachmentInfo = { // specific to dynamic rendering
                     .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
