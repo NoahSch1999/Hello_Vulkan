@@ -76,8 +76,6 @@ void msMain(
             verts[localThreadIndex].Normal = normalize(mul(Constants.IA_Args.Instance, float4(DecodeNormalOctahedral(UnpackOct16(Unpack32To16(vertex.Normal))), 0.f))).xyz;
             verts[localThreadIndex].UV = Unpack32ToHalfFloats(vertex.UV);
             verts[localThreadIndex].Meshletid = HashColor(meshletIndex);
-
-            verts[localThreadIndex].Color =  float3(  float(localThreadIndex & 1), float((localThreadIndex >> 1) & 1), float((localThreadIndex >> 2) & 1)  );
         }
     }
 }

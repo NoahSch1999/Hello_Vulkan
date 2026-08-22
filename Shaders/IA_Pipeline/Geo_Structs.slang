@@ -22,7 +22,6 @@ struct RasterVertex
     float2 UV : UV;
     float3 Normal : NORMAL;
     float3 Meshletid : MESHLET_ID;
-    float3 Color : COLOR;
 };
 
 struct MeshVertex

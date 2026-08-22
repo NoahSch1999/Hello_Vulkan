@@ -115,7 +115,6 @@ private:
     }
 };
 
-aZero::Asset::MeshletMeshData meshletMeshData;
 aZero::Asset::LegacyMeshData legacyMeshData;
 aZero::Asset::ImageData imageData;
 bool LoadAssets(const std::filesystem::path& path)
@@ -157,7 +156,6 @@ bool LoadAssets(const std::filesystem::path& path)
     imageData = aZero::File::ExtractGltfImage(asset->images[2], asset, path);*/
 
     legacyMeshData = aZero::File::ExtractGltfLegacyMesh(asset->meshes[1], asset);
-    meshletMeshData = aZero::File::ExtractGltfMeshletMesh(asset->meshes[1], asset);
     imageData = aZero::File::ExtractGltfImage(asset->images[1], asset, path);
     return true;
 }
@@ -357,7 +355,10 @@ int main()
     };
     meshImage.Upload(core, graphicsQueue, cmdPool, imgSrcBuffer, meshImageUploadDesc);
 
-    RenderAPI::Sampler sampler(core, {});
+    RenderAPI::Sampler::Desc samplerDesc{
+        .MaxLod = (float)imageData.MipLevels.size()
+    };
+    RenderAPI::Sampler sampler(core, samplerDesc);
 
     RenderAPI::DescriptorSet::Desc setDesc{ .Type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .DescriptorCount = core.GetVariadicDescriptorCount(), .ShaderStages = VkShaderStageFlagBits::VK_SHADER_STAGE_FRAGMENT_BIT};
     RenderAPI::DescriptorPool::Desc descriptorPoolDesc{
@@ -380,6 +381,7 @@ int main()
     vpDesc.Program = &vsProgram;
     vpDesc.DepthDesc = Pipeline::RenderPass::Desc::DepthStencil();
     vpDesc.RenderTargetFormats = { VK_FORMAT_B8G8R8A8_SRGB };
+    vpDesc.RasterDesc.CullMode = VkCullModeFlagBits::VK_CULL_MODE_NONE;
     Pipeline::RenderPass::VertexPassDesc::VertexBinding vBinding{
         .Stride = sizeof(aZero::Asset::Vertex),
         .InputRate = VK_VERTEX_INPUT_RATE_VERTEX,
@@ -387,15 +389,6 @@ int main()
     };
     vpDesc.VertexBindings = { vBinding };
     renderPass.Compile(vpDesc);
-
-    // ms pass
-    Pipeline::RenderPass msRenderPass(core);
-    Pipeline::RenderPass::MeshShaderPassDesc mspDesc;
-    mspDesc.Program = &msProgram;
-    mspDesc.DepthDesc = Pipeline::RenderPass::Desc::DepthStencil();
-    mspDesc.RenderTargetFormats = { VK_FORMAT_B8G8R8A8_SRGB };
-    mspDesc.RasterDesc.CullMode = VkCullModeFlagBits::VK_CULL_MODE_NONE;
-    msRenderPass.Compile(mspDesc);
 
     uint64_t lastTime{ SDL_GetTicks() };
     uint32_t frameIndex = 0;
@@ -411,7 +404,7 @@ int main()
                 .SubresourceRange{.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT, .levelCount = 1, .layerCount = 1 }
     });
 
-    RenderAPI::Buffer meshletBuffer, cameraBuffer, meshletBoundsBuffer, vertexBuffer, materialBuffer, vbibBuffer;
+    RenderAPI::Buffer cameraBuffer, materialBuffer, vbibBuffer;
     {
         RenderAPI::Buffer::Desc passBufferDesc{
             .Size = 1024 * 1024,
@@ -421,12 +414,6 @@ int main()
         };
         passBufferDesc.Name = "cameraBuffer";
         cameraBuffer = RenderAPI::Buffer(core, passBufferDesc);
-        passBufferDesc.Name = "meshletBuffer";
-        meshletBuffer = RenderAPI::Buffer(core, passBufferDesc);
-        passBufferDesc.Name = "meshletBoundsBuffer";
-        meshletBoundsBuffer = RenderAPI::Buffer(core, passBufferDesc);
-        passBufferDesc.Name = "vertexBuffer";
-        vertexBuffer = RenderAPI::Buffer(core, passBufferDesc);
         passBufferDesc.Name = "materialBuffer";
         materialBuffer = RenderAPI::Buffer(core, passBufferDesc);
 
@@ -435,10 +422,6 @@ int main()
         passBufferDesc.Name = "vbibBuffer";
         vbibBuffer = RenderAPI::Buffer(core, passBufferDesc);
     }
-
-    meshletBuffer.Upload(meshletMeshData.Meshlets, 0);
-    meshletBoundsBuffer.Upload(meshletMeshData.MeshletBounds, 0);
-    vertexBuffer.Upload(meshletMeshData.Vertices, 0);
 
     vbibBuffer.Upload(legacyMeshData.Vertices, 0);
     vbibBuffer.Upload(legacyMeshData.Indices, legacyMeshData.Vertices.size() * sizeof(legacyMeshData.Vertices[0]));
@@ -462,12 +445,9 @@ int main()
                             .GlobalMeshletOffset = 0,
                             .GlobalVertexOffset = 0,
                             .MaterialIndex = 0,
-                            .MeshletCount = (uint32_t)meshletMeshData.Meshlets.size()
+                            .MeshletCount = 0,
                         },
                         .CameraAddress = (uint64_t)cameraBuffer.GetDeviceAddress().value() + frameIndex * sizeof(CameraData),
-                        .MeshletBoundBufferAddress = (uint64_t)meshletBoundsBuffer.GetDeviceAddress().value(),
-                        .MeshletBufferAddress = (uint64_t)meshletBuffer.GetDeviceAddress().value(),
-                        .VertexBufferAddress = (uint64_t)vertexBuffer.GetDeviceAddress().value(),
                         .MaterialBufferAddress = (uint64_t)materialBuffer.GetDeviceAddress().value(),
                         .RenderMode = 0u
     };
@@ -576,22 +556,10 @@ int main()
                     };
                     VkRect2D scissor{.extent{.width = static_cast<uint32_t>(window.GetClientDimensions()[0]), .height = static_cast<uint32_t>(window.GetClientDimensions()[1]) } };
                     cb.SetScizzorRectsAndViewports({ vp }, { scissor });
-                    /*
+                    
                     auto constantsBlock = pass.GetPushConstantBlock("Constants");
 
                     constants.IA_Args.Instance = shaderData.model[0];
-                    int i = 0;
-                    for (auto& submesh : meshletMeshData.Submeshes)
-                    {
-                        constants.IA_Args.GlobalMeshletOffset = submesh.MeshletOffset;
-                        constants.IA_Args.GlobalVertexOffset = 0;
-                        constants.IA_Args.MeshletCount = submesh.MeshletCount;
-                        constants.IA_Args.Instance = shaderData.model[0];
-
-                        cb.SetPushConstants(constantsBlock, constants);
-                        cb.DispatchMesh(submesh.MeshletCount, 1, 1);
-                        i++;
-                    }*/
 
                     for (auto& submesh : legacyMeshData.Submeshes)
                     {

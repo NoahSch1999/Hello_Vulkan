@@ -16,7 +16,7 @@ namespace aZero::File
 		meshData.Name = mesh.name.c_str();
 		meshData.Submeshes.resize(numPrimitives);
 
-		uint32_t vertexOffset = 0;
+		uint32_t baseIndex = 0;
 		for (int i = 0; i < numPrimitives; i++)
 		{
 			const auto& primitive = mesh.primitives[i];
@@ -78,7 +78,7 @@ namespace aZero::File
 				std::vector<uint16_t> tempIndices(indexAccessor.count);
 				fastgltf::copyFromAccessor<uint16_t>(*asset, indexAccessor, tempIndices.data());
 				for (int j = 0; j < tempIndices.size(); j++) {
-					indices[j] = tempIndices[j];
+					indices[j] = tempIndices[j] + baseIndex;
 				}
 			}
 			else
@@ -90,7 +90,7 @@ namespace aZero::File
 			newSubmesh.Bounds = Asset::ComputeBoundingSphere(vertexData);
 			newSubmesh.IndexOffset = meshData.Indices.size();
 			newSubmesh.IndexCount = indices.size();
-			vertexOffset += vertexData.size();
+			baseIndex += indices.size();
 			meshData.Submeshes[i] = newSubmesh;
 
 			meshData.Vertices.insert(meshData.Vertices.end(), vertexData.begin(), vertexData.end());

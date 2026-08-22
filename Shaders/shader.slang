@@ -9,11 +9,6 @@ struct VSInput {
 [[vk::binding(0, 0)]] // [vk::binding(binding : int, set : int)]
 Sampler2D textures[];
 
-[[vk::binding(0, 1)]]
-SamplerState samplers[];
-[[vk::binding(1, 1)]]
-SamplerState aaaa[2];
-
 struct PushConstants
 {
     [[vk::offset(0)]]
@@ -82,7 +77,7 @@ VSOutput vsMain(VSInput input, uint instanceIndex : SV_VulkanInstanceID) {
     float4x4 modelMat = shaderData->model[instanceIndex];
     output.Normal = normalize(mul((float3x3)modelMat, DecodeNormalOctahedral(UnpackOct16(Unpack32To16(input.Normal)))));
     output.UV = Unpack32ToHalfFloats(input.UV);
-    output.Pos = mul(shaderData->projection, mul(shaderData->view, mul(modelMat, float4(input.Pos.x, input.Pos.y * -1.0, input.Pos.z, 1.0))));
+    output.Pos = mul(shaderData->projection, mul(shaderData->view, mul(modelMat, float4(input.Pos.x, input.Pos.y, input.Pos.z, 1.0))));
 
     return output;
 }
