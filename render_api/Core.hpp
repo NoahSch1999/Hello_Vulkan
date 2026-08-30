@@ -1,5 +1,5 @@
 #pragma once
-#include "VulkanInclude.hpp"
+#include "VulkanHelpers.hpp"
 
 struct DeleteCopy
 {
@@ -11,16 +11,6 @@ struct DeleteCopy
 
 namespace aZero::RenderAPI
 {
-	inline bool chkSucceed(VkResult result)
-	{
-		if (result != VK_SUCCESS) {
-			std::cerr << "Vulkan call returned an error (" << result << ")\n";
-			return false;
-		}
-
-		return true;
-	}
-
 	enum class EQueueType { Graphics, Compute, Copy };
 
 	class Core : public DeleteCopy
@@ -36,10 +26,12 @@ namespace aZero::RenderAPI
 		Core() = default;
 		~Core()
 		{
-			this->FlushGPU();
-			vmaDestroyAllocator(m_VmaAllocator);
-			vkDestroyDevice(m_Device, nullptr);
-			vkDestroyInstance(m_Instance, nullptr);
+			if (m_IsInitialized && this->FlushGPU())
+			{
+				vmaDestroyAllocator(m_VmaAllocator);
+				vkDestroyDevice(m_Device, nullptr);
+				vkDestroyInstance(m_Instance, nullptr);
+			}
 		}
 
 		Core(Core&& other) noexcept
@@ -49,6 +41,7 @@ namespace aZero::RenderAPI
 
 		Core& operator=(Core&& other) noexcept
 		{
+			std::swap(m_IsInitialized, other.m_IsInitialized);
 			std::swap(m_Instance, other.m_Instance);
 			std::swap(m_Device, other.m_Device);
 			std::swap(m_PhysicalDevice, other.m_PhysicalDevice);
@@ -67,15 +60,37 @@ namespace aZero::RenderAPI
 			this->Init(desc);
 		}
 
-		void Init(const Desc& desc)
+		bool Init(const Desc& desc)
 		{
-			this->InitAppInstance(desc);
-			this->InitPhysicalDevice();
-			this->InitDeviceAndQueues();
-			this->InitVma();
+			if (!this->InitAppInstance(desc))
+			{
+				std::cout << "Failed to init app instance.\n";
+				return false;
+			}
+
+			if (!this->InitPhysicalDevice())
+			{
+				std::cout << "Failed to init physical device.\n";
+				return false;
+			}
+
+			if (!this->InitDeviceAndQueues())
+			{
+				std::cout << "Failed to init logical device and command queues.\n";
+				return false;
+			}
+
+			if (!this->InitVma())
+			{
+				std::cout << "Failed to init vma.\n";
+				return false;
+			}
+
+			m_IsInitialized = true;
+			return m_IsInitialized;
 		}
 
-		void FlushGPU() const { chkSucceed(vkDeviceWaitIdle(m_Device)); }
+		bool FlushGPU() const { return chkSucceed(vkDeviceWaitIdle(m_Device)); }
 
 		std::string GetPhysicalDeviceName() const {
 			VkPhysicalDeviceProperties2 deviceProperties{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 };
@@ -96,6 +111,7 @@ namespace aZero::RenderAPI
 			return std::numeric_limits<uint32_t>::max();
 		}
 
+		bool IsInitialized() const { return m_IsInitialized; }
 		VkInstance GetInstance() const { return m_Instance; }
 		VkDevice GetLogicalDevice() const { return m_Device; }
 		VmaAllocator GetVmaAllocator() const { return m_VmaAllocator; }
@@ -105,6 +121,7 @@ namespace aZero::RenderAPI
 		bool IsDebugNamesSupported() const { return m_IsSupportingDebugNames; }
 
 	private:
+		bool m_IsInitialized = false;
 		VkInstance m_Instance;
 		VkDevice m_Device;
 		VmaAllocator m_VmaAllocator;
@@ -120,9 +137,12 @@ namespace aZero::RenderAPI
 
 		const char* const ValidationLayerSL = "VK_LAYER_KHRONOS_validation";
 
-		void InitAppInstance(const Desc& desc)
+		bool InitAppInstance(const Desc& desc)
 		{
-			volkInitialize();
+			if (!RenderAPI::chkSucceed(volkInitialize()))
+			{
+				return false;
+			}
 
 			// create app and instance
 			VkApplicationInfo appInfo{
@@ -141,13 +161,16 @@ namespace aZero::RenderAPI
 			std::vector<const char*> layers;
 			if (this->CheckValidationLayerSupport() && desc.EnableValidationLayer)
 			{
-				layers.push_back("VK_LAYER_KHRONOS_validation");
+				layers.push_back(ValidationLayerSL);
 			}
 
 			instanceCI.enabledLayerCount = (uint32_t)layers.size();
 			instanceCI.ppEnabledLayerNames = layers.data();
 
-			chkSucceed(vkCreateInstance(&instanceCI, nullptr, &m_Instance));
+			if (!RenderAPI::chkSucceed(vkCreateInstance(&instanceCI, nullptr, &m_Instance)))
+			{
+				return false;
+			}
 
 			volkLoadInstance(m_Instance); // hooks up function pointers for the instance
 
@@ -159,20 +182,29 @@ namespace aZero::RenderAPI
 					break;
 				}
 			}
+			return true;
 		}
 
-		void InitPhysicalDevice()
+		bool InitPhysicalDevice()
 		{
-			// lookup available devices
 			uint32_t deviceCount{ 0 };
-			chkSucceed(vkEnumeratePhysicalDevices(m_Instance, &deviceCount, nullptr)); // get count without initializing the list of devices since we dont know how many yet
+			if (!RenderAPI::chkSucceed(vkEnumeratePhysicalDevices(m_Instance, &deviceCount, nullptr))) // get count without initializing the list of devices since we dont know how many yet
+			{
+				return false;
+			}
+
 			std::vector<VkPhysicalDevice> physicalDevices(deviceCount);
-			chkSucceed(vkEnumeratePhysicalDevices(m_Instance, &deviceCount, physicalDevices.data())); // do it again
+			if (!RenderAPI::chkSucceed(vkEnumeratePhysicalDevices(m_Instance, &deviceCount, physicalDevices.data()))) // do it again
+			{
+				return false;
+			}
 
 			m_PhysicalDevice = physicalDevices[0];
+
+			return true;
 		}
 
-		void InitDeviceAndQueues()
+		bool InitDeviceAndQueues()
 		{
 			// find graphics queue and queue support
 			uint32_t queueFamilyCount{ 0 };
@@ -180,7 +212,7 @@ namespace aZero::RenderAPI
 			std::vector<VkQueueFamilyProperties> queueFamilies(queueFamilyCount);
 			vkGetPhysicalDeviceQueueFamilyProperties(m_PhysicalDevice, &queueFamilyCount, queueFamilies.data());
 
-			for (size_t i = 0; i < queueFamilies.size(); i++) {
+			for (size_t i = 0; i < queueFamilies.size(); i++) { // TODO: Fix bug if queue supports multi-type
 				if (queueFamilies[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) {
 					m_GraphicsQueueIndex = i;
 					continue;
@@ -197,63 +229,12 @@ namespace aZero::RenderAPI
 			//chk(SDL_Vulkan_GetPresentationSupport(instance, physicalDevices[deviceIndex], queueFamily));
 
 			// configure features
-			const std::vector<const char*> deviceExtensions{ VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME, VK_EXT_MESH_SHADER_EXTENSION_NAME };
-
-			//VkPhysicalDeviceMeshShaderFeaturesEXT meshFeatures{
-			//		.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT,
-			//};
-
-			//VkPhysicalDeviceFeatures2 meshFeaturesPD{
-			//	.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
-			//	.pNext = &meshFeatures
-			//};
-
-			//vkGetPhysicalDeviceFeatures2(
-			//	m_PhysicalDevice,
-			//	&meshFeaturesPD);
-
-			//m_IsMeshShadingSupported = meshFeatures.meshShader && meshFeatures.taskShader;
-
-			//if (m_IsMeshShadingSupported)
-			//{
-			//	meshFeatures.meshShader = VK_TRUE;
-			//	meshFeatures.taskShader = VK_TRUE;
-			//	meshFeatures.multiviewMeshShader = VK_FALSE;
-			//	meshFeatures.primitiveFragmentShadingRateMeshShader = VK_FALSE;
-			//}
-			//else
-			//{
-			//	meshFeaturesPD.pNext = nullptr;
-			//}
-
-			//meshFeaturesPD.features.samplerAnisotropy = VK_TRUE;
-			//meshFeaturesPD.features.shaderInt64 = VK_TRUE;
-			//meshFeaturesPD.features.shaderInt16 = VK_TRUE;
-
-			//VkPhysicalDeviceVulkan13Features vk13Features{
-			//	.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
-			//	.pNext = &meshFeaturesPD,
-			//	.synchronization2 = true,
-			//	.dynamicRendering = true,
-			//};
-
-			//VkPhysicalDeviceVulkan12Features vk12Features{
-			//	.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
-			//	.pNext = &vk13Features,
-			//	.shaderFloat16 = VK_TRUE, // enables float16 in shaders
-			//	.descriptorIndexing = true,
-			//	.shaderSampledImageArrayNonUniformIndexing = true,
-			//	.descriptorBindingVariableDescriptorCount = true,
-			//	.runtimeDescriptorArray = true,
-			//	.timelineSemaphore = VK_TRUE,
-			//	.bufferDeviceAddress = true,
-			//};
-
-			//VkPhysicalDeviceVulkan11Features vk11Features{
-			//	.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES,
-			//	.pNext = &vk12Features,
-			//	.variablePointersStorageBuffer = VK_TRUE,
-			//};
+			const std::vector<const char*> deviceExtensions{ 
+				VK_KHR_SWAPCHAIN_EXTENSION_NAME, 
+				VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME, 
+				VK_EXT_MESH_SHADER_EXTENSION_NAME,
+				VK_KHR_DRAW_INDIRECT_COUNT_EXTENSION_NAME
+			};
 
 			const float qfpriorities{ 1.f };
 			VkDeviceQueueCreateInfo graphicsQueueCI{
@@ -291,12 +272,23 @@ namespace aZero::RenderAPI
 			VkPhysicalDeviceFeatures2 supportedFeatures{};
 			VkPhysicalDeviceVulkan11Features supported11{}; VkPhysicalDeviceVulkan12Features supported12{}; VkPhysicalDeviceVulkan13Features supported13{};
 			VkPhysicalDeviceMeshShaderFeaturesEXT supportedMesh{};
-			this->HandleFeatures(deviceCI, supportedFeatures, supported11, supported12, supported13, supportedMesh);
 
-			chkSucceed(vkCreateDevice(m_PhysicalDevice, &deviceCI, nullptr, &m_Device));
+			if (!this->HandleFeatures(deviceCI, supportedFeatures, supported11, supported12, supported13, supportedMesh))
+			{
+				std::cout << "Failed to handle features.\n";
+				return false;
+			}
+
+			if (!RenderAPI::chkSucceed(vkCreateDevice(m_PhysicalDevice, &deviceCI, nullptr, &m_Device)))
+			{
+				std::cout << "Failed to create logical device.\n";
+				return false;
+			}
+
+			return true;
 		}
 
-		void HandleFeatures(
+		bool HandleFeatures(
 			VkDeviceCreateInfo& createInfo,
 			VkPhysicalDeviceFeatures2& supportedFeatures,
 			VkPhysicalDeviceVulkan11Features& supported11,
@@ -332,9 +324,10 @@ namespace aZero::RenderAPI
 			}
 			else
 			{
-				supportedMesh.pNext = nullptr;
+				std::cerr << "NOT SUPPORTED: Mesh Shader\n";
+				return false;
 			}
-
+			
 			if (supportedFeatures.features.samplerAnisotropy == VK_FALSE) {
 
 			}
@@ -375,6 +368,10 @@ namespace aZero::RenderAPI
 			if (supported12.bufferDeviceAddress == VK_FALSE) {
 
 			}
+			if (supported12.drawIndirectCount == VK_FALSE) {
+				std::cerr << "UNSUPPORTED: Draw Indirect Count.\n";
+				return false;
+			}
 
 			// vk11
 			if (supported11.variablePointersStorageBuffer == VK_FALSE) {
@@ -382,9 +379,11 @@ namespace aZero::RenderAPI
 			}
 
 			createInfo.pNext = &supportedFeatures;
+
+			return true;
 		}
 
-		void InitVma()
+		bool InitVma()
 		{
 			// setup vma
 			VmaVulkanFunctions vkFunctions{
@@ -394,14 +393,19 @@ namespace aZero::RenderAPI
 			};
 
 			VmaAllocatorCreateInfo allocatorCI{
-				.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT,
+				.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT | VMA_ALLOCATOR_CREATE_KHR_MAINTENANCE5_BIT,
 				.physicalDevice = m_PhysicalDevice,
 				.device = m_Device,
 				.pVulkanFunctions = &vkFunctions,
 				.instance = m_Instance
 			};
 
-			chkSucceed(vmaCreateAllocator(&allocatorCI, &m_VmaAllocator));
+			if (!RenderAPI::chkSucceed(vmaCreateAllocator(&allocatorCI, &m_VmaAllocator)))
+			{
+				return false;
+			}
+
+			return true;
 		}
 
 		bool CheckValidationLayerSupport()

@@ -1,10 +1,62 @@
 #pragma once
 #include "Core.hpp"
 
+namespace aZero::Pipeline { class RenderPass; }
+
 namespace aZero::RenderAPI
 {
     class Buffer;
     class Image;
+
+    class ExecuteIndirectLayout
+    {
+    public:
+        struct Desc
+        {
+            aZero::Pipeline::RenderPass* RenderPass = nullptr;
+
+            struct Token
+            {
+                uint32_t Stride;
+                VkIndirectCommandsTokenTypeEXT Type;
+            };
+            std::vector<Token> Tokens;
+        };
+        ExecuteIndirectLayout() = default;
+
+        ExecuteIndirectLayout(Core& core, const Desc& desc)
+        {
+            this->Init(core, desc);
+        }
+
+        bool Init(Core& core, const Desc& desc);
+
+        ~ExecuteIndirectLayout()
+        {
+            if (m_diCore)
+            {
+                vkDestroyIndirectCommandsLayoutEXT(m_diCore->GetLogicalDevice(), m_Layout, nullptr);
+            }
+        }
+
+        ExecuteIndirectLayout(ExecuteIndirectLayout&& other) noexcept
+        {
+            *this = std::move(other);
+        }
+
+        ExecuteIndirectLayout& operator=(ExecuteIndirectLayout&& other) noexcept
+        {
+            std::swap(m_diCore, other.m_diCore);
+            std::swap(m_Layout, other.m_Layout);
+            return *this;
+        }
+
+        VkIndirectCommandsLayoutEXT Get() const { return m_Layout; }
+    private:
+        Desc m_Desc;
+        VkIndirectCommandsLayoutEXT m_Layout;
+        RenderAPI::Core* m_diCore = nullptr;
+    };
 
     struct BufferToImageCopyDesc
     {
@@ -84,15 +136,34 @@ namespace aZero::RenderAPI
             vkCmdDrawMeshTasksEXT(m_CommandBuffer, tgx, tgy, tgz);
         }
 
+        struct ExecuteIndirectDGCDesc
+        {
+            RenderAPI::ExecuteIndirectLayout* Layout = nullptr;
+            aZero::Pipeline::RenderPass* RenderPass = nullptr;
+            RenderAPI::Buffer* IndirectCommandsBuffer = nullptr;
+            RenderAPI::Buffer* PreprocessBuffer = nullptr;
+            RenderAPI::Buffer* SequencesBuffer = nullptr;
+            uint32_t MaxSequences;
+            uint32_t MaxDraws;
+        };
+
+        bool ExecuteIndirectDGC(const ExecuteIndirectDGCDesc& desc);
+
+        struct ExecuteIndirectDesc
+        {
+            RenderAPI::Buffer* IndirectArgumentBuffer = nullptr;
+            VkDeviceSize IndirectArgumentBufferOffset;
+            uint32_t IndirectArgumentStride;
+            RenderAPI::Buffer* CountBuffer = nullptr;
+            VkDeviceSize CountBufferOffset;
+            uint32_t MaxDraws;
+        };
+        bool ExecuteIndirectMeshTasksCount(const ExecuteIndirectDesc& desc);
+
         void SetScizzorRectsAndViewports(const std::vector<VkViewport>& viewports, const std::vector<VkRect2D>& scizzorRects) const
         {
             vkCmdSetViewport(m_CommandBuffer, 0, viewports.size(), viewports.data());
             vkCmdSetScissor(m_CommandBuffer, 0, scizzorRects.size(), scizzorRects.data());
-        }
-
-        void SetPipeline() const
-        {
-
         }
 
         void SetVertexBuffer(const RenderAPI::Buffer& buffer, uint64_t offset) const;

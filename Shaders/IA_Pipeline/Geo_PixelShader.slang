@@ -1,4 +1,4 @@
-#include "Geo_Structs.slang"
+#include "Geo_Draw_Structs.slang"
 
 struct Output
 {
@@ -23,9 +23,9 @@ Output psMain(RasterVertex pin)
 {
     Output output;
 
-    PBRMaterial* materialBuffer = (PBRMaterial*)Constants.MaterialBufferAddress;
+    PBRMaterial *materialBuffer = (PBRMaterial *)Constants.MaterialBufferPtr;
 
-    PBRMaterial material = materialBuffer[Constants.IA_Args.MaterialIndex];
+    PBRMaterial material = materialBuffer[pin.MaterialIndex];
 
     if (material.AlbedoTexture == 0xffffffff)
     {

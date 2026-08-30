@@ -6,13 +6,22 @@
 namespace aZero::RenderAPI
 {
     enum class EMemoryType { BestFit, VRAM_Only, SYSRAM_Only, Readback };
-    enum class EBufferUsageBits { TransferSrc = 0x00000001, TransferDst = 0x00000002, Uniform = 0x00000010, Storage = 0x00000020, Index = 0x00000040, Vertex = 0x00000080, Indirect = 0x00000100, DeviceAddress = 0x00020000 };
+    enum class EBufferUsageBits : uint32_t { 
+        TransferSrc = VkBufferUsageFlagBits::VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        TransferDst = VkBufferUsageFlagBits::VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        Uniform = VkBufferUsageFlagBits::VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+        Storage = VkBufferUsageFlagBits::VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+        Index = VkBufferUsageFlagBits::VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+        Vertex = VkBufferUsageFlagBits::VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+        Indirect = VkBufferUsageFlagBits::VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT,
+        DeviceAddress = VkBufferUsageFlagBits::VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT
+    };
     
     constexpr EBufferUsageBits operator|(EBufferUsageBits lhs, EBufferUsageBits rhs)
     {
         return static_cast<EBufferUsageBits>(
-            static_cast<std::uint32_t>(lhs) |
-            static_cast<std::uint32_t>(rhs));
+            static_cast<std::uint64_t>(lhs) |
+            static_cast<std::uint64_t>(rhs));
     }
 
     constexpr EBufferUsageBits& operator|=(EBufferUsageBits& lhs, EBufferUsageBits rhs)
@@ -40,31 +49,6 @@ namespace aZero::RenderAPI
             return VmaMemoryUsage::VMA_MEMORY_USAGE_GPU_TO_CPU;
         default:
             return VmaMemoryUsage::VMA_MEMORY_USAGE_MAX_ENUM;
-        }
-    }
-
-    inline VkBufferUsageFlagBits ToVkBufferUsage(EBufferUsageBits type)
-    {
-        switch (type)
-        {
-        case EBufferUsageBits::TransferSrc:
-            return VkBufferUsageFlagBits::VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-        case EBufferUsageBits::TransferDst:
-            return VkBufferUsageFlagBits::VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-        case EBufferUsageBits::Uniform:
-            return VkBufferUsageFlagBits::VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-        case EBufferUsageBits::Storage:
-            return VkBufferUsageFlagBits::VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-        case EBufferUsageBits::Index:
-            return VkBufferUsageFlagBits::VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
-        case EBufferUsageBits::Vertex:
-            return VkBufferUsageFlagBits::VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-        case EBufferUsageBits::Indirect:
-            return VkBufferUsageFlagBits::VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
-        case EBufferUsageBits::DeviceAddress:
-            return VkBufferUsageFlagBits::VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
-        default:
-            return VkBufferUsageFlagBits::VK_BUFFER_USAGE_FLAG_BITS_MAX_ENUM;
         }
     }
 
@@ -102,6 +86,7 @@ namespace aZero::RenderAPI
             std::swap(m_AllocationInfo, other.m_AllocationInfo);
             std::swap(m_DeviceAddress, other.m_DeviceAddress);
             std::swap(m_Desc, other.m_Desc);
+            std::swap(m_LastBarrier, other.m_LastBarrier);
             return *this;
         }
 
@@ -113,10 +98,11 @@ namespace aZero::RenderAPI
         void Init(Core& core, const Desc& desc)
         {
             VkDeviceSize size{ desc.Size };
+
             VkBufferCreateInfo bufferCI{
                 .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
                 .size = size,
-                .usage = (VkBufferUsageFlags)desc.UsageBits /*VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT*/
+                .usage = (VkBufferUsageFlags)desc.UsageBits
             };
 
             VmaAllocationCreateInfo allocCI{
@@ -162,6 +148,8 @@ namespace aZero::RenderAPI
             printf("memory props: 0x%x\n", props);
             printf("mapped: %p\n", m_AllocationInfo.pMappedData);*/
 
+            m_LastBarrier = {};
+
             m_Desc = desc;
             m_diCore = &core;
         }
@@ -192,6 +180,7 @@ namespace aZero::RenderAPI
 
         void Transition(const TransitionDesc& desc)
         {
+            m_LastBarrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2;
             m_LastBarrier.srcStageMask = m_LastBarrier.dstStageMask;
             m_LastBarrier.srcAccessMask = m_LastBarrier.dstAccessMask;
 

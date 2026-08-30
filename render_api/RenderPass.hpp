@@ -23,6 +23,7 @@ namespace aZero::Pipeline
 
         struct Reflection
         {
+            VkShaderStageFlags ShaderStages;
             std::unordered_map<std::string, Compiler::PushConstantRangeReflection> PushConstants;
         };
 
@@ -77,7 +78,14 @@ namespace aZero::Pipeline
         }
 
         RenderPass(aZero::RenderAPI::Core& core)
-            :m_diCore(&core) { }
+        {
+            this->Init(core);
+        }
+
+        void Init(aZero::RenderAPI::Core& core)
+        {
+            m_diCore = &core;
+        }
 
         struct RenderDesc
         {
@@ -106,6 +114,35 @@ namespace aZero::Pipeline
 
             RenderCallback Callback;
         };
+
+        struct ComputeDispatchDesc
+        {
+            uint32_t GroupX, GroupY, GroupZ;
+            std::vector<RenderAPI::DescriptorSet*> DescriptorSets;
+            RenderCallback Callback;
+        };
+
+        bool Render(RenderAPI::CommandBuffer& commandBuffer, const ComputeDispatchDesc& desc)
+        {
+            if (m_Type != ERenderPassType::Compute)
+            {
+                std::cout << "Can't begin a render pass that isn't a ERenderPassType::Compute.\n";
+                return false;
+            }
+
+            vkCmdBindPipeline(commandBuffer.Get(), VK_PIPELINE_BIND_POINT_COMPUTE, m_Pipeline);
+
+            std::vector<VkDescriptorSet> descSets;
+            for (const auto& set : desc.DescriptorSets)
+            {
+                descSets.push_back(set->Get());
+            }
+            vkCmdBindDescriptorSets(commandBuffer.Get(), VK_PIPELINE_BIND_POINT_COMPUTE, m_Layout, 0, (uint32_t)descSets.size(), descSets.data(), 0, nullptr);
+
+            desc.Callback(commandBuffer, *this);
+
+            vkCmdDispatch(commandBuffer.Get(), desc.GroupX, desc.GroupY, desc.GroupZ);
+        }
 
         bool Render(RenderAPI::CommandBuffer& commandBuffer, const RenderDesc& renderDesc)
         {
@@ -252,6 +289,68 @@ namespace aZero::Pipeline
 
         using MeshShaderPassDesc = Desc;
 
+        struct ComputePassDesc
+        {
+            Compiler::ShaderProgram* Program = nullptr;
+        };
+
+        bool Compile(const ComputePassDesc& desc)
+        {
+            if (!m_diCore) {
+                std::cout << "No vulkan core available.\n";
+                return false;
+            }
+
+            if (!desc.Program) {
+                std::cout << "No program input.\n";
+                return false;
+            }
+
+            const Compiler::ShaderProgram::Reflection& reflection = desc.Program->GetReflection();
+
+            VkPipelineShaderStageCreateInfo stageCi{
+                .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+                .stage = VK_SHADER_STAGE_COMPUTE_BIT
+            };
+
+            for (const auto& [stageName, moduleInfo] : reflection.Modules)
+            {
+                stageCi.module = moduleInfo.VkModule;
+                stageCi.pName = moduleInfo.Name.c_str();
+                break;
+            }
+
+            std::vector<VkDescriptorSetLayout> layouts;
+            for (const auto& [setIndex, set] : reflection.DescriptorSets)
+            {
+                layouts.push_back(set.Layout);
+            }
+
+            if (m_Layout = this->CreatePipelineLayout(reflection); !m_Layout)
+            {
+                return false;
+            }
+
+            VkComputePipelineCreateInfo ci{
+                .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+                .flags = 0,
+                .stage = stageCi,
+                .layout = m_Layout,
+                .basePipelineHandle = VK_NULL_HANDLE,
+                .basePipelineIndex = -1
+            };
+
+            if (!aZero::RenderAPI::chkSucceed(vkCreateComputePipelines(m_diCore->GetLogicalDevice(), nullptr, 1, &ci, nullptr, &m_Pipeline)))
+            {
+                return false;
+            }
+
+            this->PopulateReflection(desc.Program->GetReflection());
+            m_Type = ERenderPassType::Compute;
+
+            return true;
+        }
+
         bool Compile(const MeshShaderPassDesc& desc)
         {
             return this->CompilePipeline(desc, {}, {});
@@ -312,6 +411,12 @@ namespace aZero::Pipeline
         void PopulateReflection(const Compiler::ShaderProgram::Reflection& reflection)
         {
             m_Reflection.PushConstants = reflection.PushConstants;
+
+            m_Reflection.ShaderStages = 0;
+            for (const auto& [name, module] : reflection.Modules)
+            {
+                m_Reflection.ShaderStages |= module.Stage;
+            }
         }
 
         template<typename T>
@@ -387,27 +492,7 @@ namespace aZero::Pipeline
                 m_HasDepthStencilTarget = true;
             }
 
-            std::vector<VkDescriptorSetLayout> layouts;
-            for (const auto& [setIndex, set] : reflection.DescriptorSets)
-            {
-                layouts.push_back(set.Layout);
-            }
-
-            std::vector<VkPushConstantRange> pcRanges;
-            for (const auto& [offset, constant] : reflection.PushConstants)
-            {
-                pcRanges.push_back(constant.Range);
-            }
-
-            VkPipelineLayoutCreateInfo pipelineLayoutCI{
-                .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-                .setLayoutCount = (uint32_t)layouts.size(),
-                .pSetLayouts = layouts.data(),
-                .pushConstantRangeCount = (uint32_t)pcRanges.size(),
-                .pPushConstantRanges = pcRanges.data()
-            };
-
-            if (!aZero::RenderAPI::chkSucceed(vkCreatePipelineLayout(m_diCore->GetLogicalDevice(), &pipelineLayoutCI, nullptr, &m_Layout)))
+            if (m_Layout = this->CreatePipelineLayout(reflection); !m_Layout)
             {
                 return false;
             }
@@ -442,6 +527,37 @@ namespace aZero::Pipeline
             this->PopulateReflection(desc.Program->GetReflection());
             m_Type = ERenderPassType::Graphics;
             return true;
+        }
+
+        VkPipelineLayout CreatePipelineLayout(const Compiler::ShaderProgram::Reflection& reflection)
+        {
+            std::vector<VkDescriptorSetLayout> layouts;
+            for (const auto& [setIndex, set] : reflection.DescriptorSets)
+            {
+                layouts.push_back(set.Layout);
+            }
+
+            std::vector<VkPushConstantRange> pcRanges;
+            for (const auto& [offset, constant] : reflection.PushConstants)
+            {
+                pcRanges.push_back(constant.Range);
+            }
+
+            VkPipelineLayoutCreateInfo pipelineLayoutCI{
+                .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+                .setLayoutCount = (uint32_t)layouts.size(),
+                .pSetLayouts = layouts.data(),
+                .pushConstantRangeCount = (uint32_t)pcRanges.size(),
+                .pPushConstantRanges = pcRanges.data()
+            };
+
+            VkPipelineLayout layout;
+            if (!aZero::RenderAPI::chkSucceed(vkCreatePipelineLayout(m_diCore->GetLogicalDevice(), &pipelineLayoutCI, nullptr, &layout)))
+            {
+                return nullptr;
+            }
+
+            return layout;
         }
 
         ERenderPassType m_Type;

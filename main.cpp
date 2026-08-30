@@ -20,56 +20,8 @@
 #include "render_api/CommandQueue.hpp"
 #include "render_api/Compiler.hpp"
 #include "render_api/RenderPass.hpp"
+#include "Loading_Assets/Geo_PassStructs.hpp"
 
-/*
-Ideas:
-- assets as components with flecs
-- 
-*/
-
-struct CameraData
-{
-    glm::mat4 ViewMatrix;
-    glm::mat4 ViewProjectionMatrix;
-    aZero::BoundingVolume::BoundingFrustum Frustum;
-};
-
-struct IndirectArgumentConstantData
-{
-    glm::mat4 Instance;
-    uint32_t GlobalMeshletOffset;
-    uint32_t GlobalVertexOffset;
-    uint32_t MaterialIndex;
-    uint32_t MeshletCount;
-};
-
-struct IndirectArguments
-{
-    IndirectArgumentConstantData Data;
-    uint32_t GroupX;
-    uint32_t GroupY;
-    uint32_t GroupZ;
-};
-
-struct PushConstants
-{
-    // CS CULL => AS
-    IndirectArgumentConstantData IA_Args;
-
-    // AS, MS, PS
-    uint64_t CameraAddress;
-
-    // AS
-    uint64_t MeshletBoundBufferAddress;
-
-    // MS
-    uint64_t MeshletBufferAddress;
-    uint64_t VertexBufferAddress;
-
-    uint64_t MaterialBufferAddress;
-
-    uint32_t RenderMode;
-};
 
 class RenderWindow : public aZero::Window::Window_Win32 {
 public:
@@ -156,9 +108,159 @@ bool LoadAssets(const std::filesystem::path& path)
     return true;
 }
 
+using namespace aZero;
+
+
+struct RenderingVariables
+{
+    Compiler::ShaderProgram msProgram;
+    Compiler::ShaderProgram csCullProgram;
+    Pipeline::RenderPass msRenderPass;
+    Pipeline::RenderPass csCullPass;
+
+    RenderAPI::Buffer
+        cameraBuffer,
+        meshletBoundsBuffer,
+        instanceDataBuffer,
+        materialBuffer,
+        iaBuffer,
+        meshDataBuffer,
+        instanceCullDataBuffer,
+        drawMetadataBuffer
+        ;
+};
+
+
+void SetupRenderingPasses(RenderAPI::Core& core, Compiler::Compiler& compiler, RenderingVariables& vars)
+{
+    Compiler::CompilerSession::Desc d;
+    d.CompilerOptions = std::vector<slang::CompilerOptionEntry>({
+        {
+            slang::CompilerOptionName::EmitSpirvDirectly,
+            {slang::CompilerOptionValueKind::Int, 1}
+        },
+        {
+            slang::CompilerOptionName::DebugInformation,
+            {slang::CompilerOptionValueKind::Int, SLANG_DEBUG_INFO_LEVEL_STANDARD}
+        },
+        {
+            slang::CompilerOptionName::Optimization,
+            {slang::CompilerOptionValueKind::Int, SLANG_OPTIMIZATION_LEVEL_NONE}
+        }
+        });
+
+    Compiler::CompilerSession session = compiler.CreateSession(d).value();
+
+    // CS
+    Compiler::ShaderModule moduleComputeCull = session.LoadModule("C:/Coding/Hello_Vulkan/Shaders/IA_Pipeline/Geo_ComputeCull.slang").value();
+    Compiler::ShaderProgram::ComputeDesc csProgramDesc{
+        .EntryPointName = {"main"},
+        .Modules = { &moduleComputeCull }
+    };
+    vars.csCullProgram.Build(csProgramDesc);
+
+    vars.csCullPass.Init(core);
+    Pipeline::RenderPass::ComputePassDesc csCullPassDesc{
+        .Program = &vars.csCullProgram
+    };
+    vars.csCullPass.Compile(csCullPassDesc);
+
+    // MS
+    Compiler::ShaderModule moduleTaskShaderPass = session.LoadModule("C:/Coding/Hello_Vulkan/Shaders/IA_Pipeline/Geo_TaskShader.slang").value();
+    Compiler::ShaderModule moduleMeshShaderPass = session.LoadModule("C:/Coding/Hello_Vulkan/Shaders/IA_Pipeline/Geo_MeshShader.slang").value();
+    Compiler::ShaderModule modulePixelShaderPass = session.LoadModule("C:/Coding/Hello_Vulkan/Shaders/IA_Pipeline/Geo_PixelShader.slang").value();
+
+    Compiler::ShaderProgram::MeshletDesc msProgramDesc{
+        .EntryPoints = {"asMain", "msMain", "psMain"},
+        .Modules = {&moduleTaskShaderPass, &moduleMeshShaderPass, &modulePixelShaderPass}
+    };
+    vars.msProgram.Build(msProgramDesc);
+
+    vars.msRenderPass.Init(core);
+    Pipeline::RenderPass::MeshShaderPassDesc mspDesc;
+    mspDesc.Program = &vars.msProgram;
+    mspDesc.DepthDesc = Pipeline::RenderPass::Desc::DepthStencil();
+    mspDesc.RenderTargetFormats = { VK_FORMAT_B8G8R8A8_SRGB };
+    mspDesc.RasterDesc.CullMode = VkCullModeFlagBits::VK_CULL_MODE_NONE;
+    vars.msRenderPass.Compile(mspDesc);
+
+    // RESOURCES
+
+    RenderAPI::Buffer::Desc passBufferDesc{
+        .Size = 1024 * 1024,
+        .UsageBits = RenderAPI::EBufferUsageBits::DeviceAddress,
+        .MemoryType = RenderAPI::EMemoryType::BestFit,
+        .SeperateHeap = false
+    };
+
+    passBufferDesc.Name = "cameraBuffer";
+    vars.cameraBuffer = RenderAPI::Buffer(core, passBufferDesc);
+
+    passBufferDesc.Name = "meshletBoundsBuffer";
+    vars.meshletBoundsBuffer = RenderAPI::Buffer(core, passBufferDesc);
+
+    passBufferDesc.Name = "instanceDataBuffer";
+    vars.instanceDataBuffer = RenderAPI::Buffer(core, passBufferDesc);
+
+    passBufferDesc.Name = "instanceCullDataBuffer";
+    vars.instanceCullDataBuffer = RenderAPI::Buffer(core, passBufferDesc);
+
+    passBufferDesc.Name = "drawMetadataBuffer";
+    vars.drawMetadataBuffer = RenderAPI::Buffer(core, passBufferDesc);
+
+    passBufferDesc.Name = "materialBuffer";
+    vars.materialBuffer = RenderAPI::Buffer(core, passBufferDesc);
+
+    passBufferDesc.Name = "meshDataBuffer";
+    passBufferDesc.Size = meshletMeshData.Meshlets.size() * sizeof(meshletMeshData.Meshlets[0]) + meshletMeshData.Vertices.size() * sizeof(meshletMeshData.Vertices[0]);
+    vars.meshDataBuffer = RenderAPI::Buffer(core, passBufferDesc);
+
+    passBufferDesc.Name = "iaBuffer";
+    passBufferDesc.UsageBits = RenderAPI::EBufferUsageBits::DeviceAddress | RenderAPI::EBufferUsageBits::Indirect;
+    passBufferDesc.Size = 1024 * 1024,
+        vars.iaBuffer = RenderAPI::Buffer(core, passBufferDesc);
+
+    aZero::Rendering::MeshTaskIndirectArgs iaData{
+        .GroupX = meshletMeshData.Submeshes[0].MeshletCount, .GroupY = 1, .GroupZ = 1
+    };
+
+    aZero::Rendering::PBRMaterial material{
+        .AlbedoTexture = 0
+    };
+
+    aZero::Rendering::InstanceData instanceData{
+        .WorldMatrix = glm::rotate(glm::mat4(1.0), glm::radians(180.f), glm::vec3(0.f, 1.f, 0.f)),
+        .MeshletBDA = vars.meshDataBuffer.GetDeviceAddress().value(),
+        .VertexBDA = vars.meshDataBuffer.GetDeviceAddress().value() + (VkDeviceAddress)(meshletMeshData.Meshlets.size() * sizeof(meshletMeshData.Meshlets[0])),
+        .MeshletCount = meshletMeshData.Submeshes[0].MeshletCount,
+        .MaterialIndex = 0
+    };
+
+    aZero::Rendering::InstanceCullData instanceCullData{
+        .WorldSpaceBounds = {
+            .Origin = glm::vec3(0.f, 1.f, 0.f),
+            .Radius = meshletMeshData.Submeshes[0].Bounds.Radius
+        }
+    };
+
+    aZero::Rendering::DrawMetaData drawData{
+        .InstanceIndex = 0,
+        .MeshletCount = meshletMeshData.Submeshes[0].MeshletCount
+    };
+
+    vars.drawMetadataBuffer.Upload(drawData, 0);
+    vars.iaBuffer.Upload(1, 0);
+    vars.iaBuffer.Upload(iaData, sizeof(uint32_t));
+    vars.materialBuffer.Upload(material, 0);
+    vars.meshDataBuffer.Upload(meshletMeshData.Meshlets, 0);
+    vars.meshDataBuffer.Upload(meshletMeshData.Vertices, meshletMeshData.Meshlets.size() * sizeof(meshletMeshData.Meshlets[0]));
+    vars.meshletBoundsBuffer.Upload(meshletMeshData.MeshletBounds, 0);
+    vars.instanceDataBuffer.Upload(instanceData, 0);
+    vars.instanceCullDataBuffer.Upload(instanceCullData, 0);
+}
+
 int main()
 {
-    using namespace aZero;
 
     bool loaded = LoadAssets("C:/Coding/aZeroEditor/content/scenes/TEST2.gltf");
     if (!loaded) {
@@ -191,38 +293,12 @@ int main()
         .EnableValidationLayer = true
     };
     RenderAPI::Core core(coreDesc);
+    bool isinit = core.IsInitialized();
+    std::cout << "Initialized: " << isinit << "\n";
 
     // ----------------------------------------------------------------------------------------------------
     // create and compile slang shader
     Compiler::Compiler compiler(core);
-    Compiler::CompilerSession::Desc d;
-    d.CompilerOptions = std::vector<slang::CompilerOptionEntry>({
-        {
-            slang::CompilerOptionName::EmitSpirvDirectly,
-            {slang::CompilerOptionValueKind::Int, 1}
-        },
-        {
-            slang::CompilerOptionName::DebugInformation,
-            {slang::CompilerOptionValueKind::Int, SLANG_DEBUG_INFO_LEVEL_STANDARD}
-        },
-        {
-            slang::CompilerOptionName::Optimization,
-            {slang::CompilerOptionValueKind::Int, SLANG_OPTIMIZATION_LEVEL_NONE}
-        }
-        });
-    d.PreprocessorMacros.push_back({ "HELLO", "" });
-    
-    Compiler::CompilerSession session = compiler.CreateSession(d).value();
-
-    Compiler::ShaderModule moduleTaskShaderPass = session.LoadModule("C:/Coding/Hello_Vulkan/Shaders/IA_Pipeline/Geo_TaskShader.slang").value();
-    Compiler::ShaderModule moduleMeshShaderPass = session.LoadModule("C:/Coding/Hello_Vulkan/Shaders/IA_Pipeline/Geo_MeshShader.slang").value();
-    Compiler::ShaderModule modulePixelShaderPass = session.LoadModule("C:/Coding/Hello_Vulkan/Shaders/IA_Pipeline/Geo_PixelShader.slang").value();
-
-    Compiler::ShaderProgram::MeshletDesc msProgramDesc{
-        .EntryPoints = {"asMain", "msMain", "psMain"},
-        .Modules = {&moduleTaskShaderPass, &moduleMeshShaderPass, &modulePixelShaderPass}
-    };
-    Compiler::ShaderProgram msProgram(msProgramDesc);
 
     // ----------------------------------------------------------------------------------------------------
 
@@ -339,15 +415,6 @@ int main()
     };
     descriptorSet.UpdateDescriptor(descriptorHandle);
 
-    // ms pass
-    Pipeline::RenderPass msRenderPass(core);
-    Pipeline::RenderPass::MeshShaderPassDesc mspDesc;
-    mspDesc.Program = &msProgram;
-    mspDesc.DepthDesc = Pipeline::RenderPass::Desc::DepthStencil();
-    mspDesc.RenderTargetFormats = { VK_FORMAT_B8G8R8A8_SRGB };
-    mspDesc.RasterDesc.CullMode = VkCullModeFlagBits::VK_CULL_MODE_NONE;
-    msRenderPass.Compile(mspDesc);
-
     uint64_t lastTime{ SDL_GetTicks() };
     uint32_t frameIndex = 0;
     //uint32_t imageIndex{ 0 };
@@ -362,58 +429,8 @@ int main()
                 .SubresourceRange{.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT, .levelCount = 1, .layerCount = 1 }
     });
 
-    RenderAPI::Buffer meshletBuffer, cameraBuffer, meshletBoundsBuffer, vertexBuffer, materialBuffer;
-    {
-        RenderAPI::Buffer::Desc passBufferDesc{
-            .Size = 1024 * 1024,
-            .UsageBits = RenderAPI::EBufferUsageBits::DeviceAddress,
-            .MemoryType = RenderAPI::EMemoryType::BestFit,
-            .SeperateHeap = false
-        };
-        passBufferDesc.Name = "cameraBuffer";
-        cameraBuffer = RenderAPI::Buffer(core, passBufferDesc);
-        passBufferDesc.Name = "meshletBuffer";
-        meshletBuffer = RenderAPI::Buffer(core, passBufferDesc);
-        passBufferDesc.Name = "meshletBoundsBuffer";
-        meshletBoundsBuffer = RenderAPI::Buffer(core, passBufferDesc);
-        passBufferDesc.Name = "vertexBuffer";
-        vertexBuffer = RenderAPI::Buffer(core, passBufferDesc);
-        passBufferDesc.Name = "materialBuffer";
-        materialBuffer = RenderAPI::Buffer(core, passBufferDesc);
-    }
-
-    meshletBuffer.Upload(meshletMeshData.Meshlets, 0);
-    meshletBoundsBuffer.Upload(meshletMeshData.MeshletBounds, 0);
-    vertexBuffer.Upload(meshletMeshData.Vertices, 0);
-
-    struct PBRMaterial
-    {
-        // todo Use the albedo alpha channel for roughness and normal w channel for metallic
-        uint32_t AlbedoTexture;
-        uint32_t NormalMap;
-        uint32_t RoughnessMetallic;
-        uint32_t GlowMap;
-        uint32_t TransparencyMap;
-    };
-    PBRMaterial material{
-        .AlbedoTexture = 0
-    };
-    materialBuffer.Upload(material, 0);
-
-    PushConstants constants{
-                        .IA_Args = {
-                            .GlobalMeshletOffset = 0,
-                            .GlobalVertexOffset = 0,
-                            .MaterialIndex = 0,
-                            .MeshletCount = (uint32_t)meshletMeshData.Meshlets.size()
-                        },
-                        .CameraAddress = (uint64_t)cameraBuffer.GetDeviceAddress().value() + frameIndex * sizeof(CameraData),
-                        .MeshletBoundBufferAddress = (uint64_t)meshletBoundsBuffer.GetDeviceAddress().value(),
-                        .MeshletBufferAddress = (uint64_t)meshletBuffer.GetDeviceAddress().value(),
-                        .VertexBufferAddress = (uint64_t)vertexBuffer.GetDeviceAddress().value(),
-                        .MaterialBufferAddress = (uint64_t)materialBuffer.GetDeviceAddress().value(),
-                        .RenderMode = 0u
-    };
+    RenderingVariables vars;
+    SetupRenderingPasses(core, compiler, vars);
 
     while (window.IsOpen())
     {
@@ -426,7 +443,7 @@ int main()
 
         swapchain.NextFrame(frameIndex);
 
-        // Update shader data
+        // Update shader data6
         if (GetAsyncKeyState('W'))
         {
             camPos.z += 0.001f;
@@ -455,17 +472,29 @@ int main()
         glm::mat4 projection = glm::perspective(glm::radians(45.0f), (float)window.GetClientDimensions()[0] / (float)window.GetClientDimensions()[1], 0.1f, 1000.0f);
         glm::mat4 view = glm::translate(glm::mat4(1.0f), camPos);
 
-        CameraData cameraData{
+        aZero::Rendering::CameraData cameraData{
             .ViewMatrix = view,
             .ViewProjectionMatrix = projection * view
         };
-        cameraBuffer.Upload(cameraData, frameIndex * sizeof(CameraData));
+        vars.cameraBuffer.Upload(cameraData, frameIndex * sizeof(aZero::Rendering::CameraData));
 
         // Record command buffer
         RenderAPI::CommandBuffer& cb = cmdBuffers[frameIndex];
         cb.Reset(); // reset (needs to be done after checking that its no longer in use)
 
         cb.StartRecording(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+
+        /*csCullPass.Render(cb, {
+            .GroupX = 1, .GroupY = 1, .GroupZ = 1,
+            .DescriptorSets = {},
+            .Callback = [&](RenderAPI::CommandBuffer& cb, Pipeline::RenderPass& pass) {
+                 aZero::Rendering::InstanceCullPushConstants constants {
+                         .CameraBufferPtr = cameraBuffer.GetDeviceAddress().value() + frameIndex * sizeof(aZero::Rendering::CameraData),
+                         .InstanceCullDataBufferPtr = instanceCullDataBuffer.GetDeviceAddress().value(),
+                         .DrawMetadataBufferPtr = drawMetadataBuffer.GetDeviceAddress().value()
+                    };
+            }
+        });*/
 
         VkImageMemoryBarrier2 outputBarriers[2];
         outputBarriers[0] = {
@@ -489,9 +518,17 @@ int main()
 
         outputBarriers[1] = depthImage.Get().GetTransition();
 
-        cb.Barrier({}, { outputBarriers[0], outputBarriers[1] }, {});
+        RenderAPI::Buffer::TransitionDesc iaDesc{
+            .DstStageMask = VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT,
+            .DstAccessMask = VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT,
+            .Offset = 0,
+            .Size = (uint32_t)vars.iaBuffer.GetDesc().Size
+        };
+        vars.iaBuffer.Transition(iaDesc);
 
-        msRenderPass.Render(
+        cb.Barrier({}, { outputBarriers[0], outputBarriers[1] }, { vars.iaBuffer.GetTransition() });
+
+        vars.msRenderPass.Render(
             cb,
             {
                 .ColorTargets = {{.View = swapchain.GetCurrentBackBufferView() }},
@@ -500,7 +537,7 @@ int main()
                 .RenderHeight = static_cast<uint32_t>(window.GetClientDimensions()[1]),
                 .DescriptorSets = {&descriptorSet},
                 .Callback = [&](RenderAPI::CommandBuffer& cb, Pipeline::RenderPass& pass) {
-                    
+
                     // since we made them dynamic when creating the pipeline we overwrite them here
                     VkViewport vp{
                         .x = 0.f,
@@ -512,21 +549,25 @@ int main()
                     };
                     VkRect2D scissor{.extent{.width = static_cast<uint32_t>(window.GetClientDimensions()[0]), .height = static_cast<uint32_t>(window.GetClientDimensions()[1]) } };
                     cb.SetScizzorRectsAndViewports({ vp }, { scissor });
-                    
-                    auto constantsBlock = pass.GetPushConstantBlock("Constants");
 
-                    int i = 0;
-                    for (auto& submesh : meshletMeshData.Submeshes)
-                    {
-                        constants.IA_Args.GlobalMeshletOffset = submesh.MeshletOffset;
-                        constants.IA_Args.GlobalVertexOffset = 0;
-                        constants.IA_Args.MeshletCount = submesh.MeshletCount;
-                        constants.IA_Args.Instance = glm::rotate(glm::mat4(1.0), glm::radians(180.f), glm::vec3(0.f, 1.f, 0.f));
-                        glm::
-                        cb.SetPushConstants(constantsBlock, constants);
-                        cb.DispatchMesh(submesh.MeshletCount, 1, 1);
-                        i++;
-                    }
+                    aZero::Rendering::GeoDrawPushConstants constants{
+                         .CameraBufferPtr = vars.cameraBuffer.GetDeviceAddress().value() + frameIndex * sizeof(aZero::Rendering::CameraData),
+                         .MeshletBoundBufferPtr = vars.meshletBoundsBuffer.GetDeviceAddress().value(),
+                         .MaterialBufferPtr = vars.materialBuffer.GetDeviceAddress().value(),
+                         .InstanceDataBufferPtr = vars.instanceDataBuffer.GetDeviceAddress().value(),
+                         .DrawMetadataBufferPtr = vars.drawMetadataBuffer.GetDeviceAddress().value(),
+                         .RenderMode = 0u
+                    };
+
+                    RenderAPI::CommandBuffer::ExecuteIndirectDesc exeDesc{
+                        .IndirectArgumentBuffer = &vars.iaBuffer,
+                        .IndirectArgumentBufferOffset = (uint32_t)(sizeof(uint32_t)), // Starts after count
+                        .IndirectArgumentStride = (uint32_t)(sizeof(uint32_t) * 3),
+                        .CountBuffer = &vars.iaBuffer,
+                        .CountBufferOffset = 0,
+                        .MaxDraws = 1
+                    };
+                    cb.ExecuteIndirectMeshTasksCount(exeDesc);
                 }
             }
         );
