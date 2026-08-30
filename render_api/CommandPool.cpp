@@ -88,6 +88,16 @@ void aZero::RenderAPI::CommandBuffer::Copy(const BufferToImageCopyDesc& copyDesc
     vkCmdCopyBufferToImage(m_CommandBuffer, srcBuffer.Get(), dstImage.Get(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, static_cast<uint32_t>(copyRegionsTemp.size()), copyRegionsTemp.data());
 }
 
+void aZero::RenderAPI::CommandBuffer::Copy(const RenderAPI::Buffer& srcBuffer, uint32_t srcOffset, const RenderAPI::Buffer& dstBuffer, uint32_t dstOffset, uint32_t size)
+{
+    VkBufferCopy cpy{
+        .srcOffset = srcOffset,
+        .dstOffset = dstOffset,
+        .size = size
+    };
+    vkCmdCopyBuffer(m_CommandBuffer, srcBuffer.Get(), dstBuffer.Get(), 1, &cpy);
+}
+
 bool aZero::RenderAPI::CommandBuffer::ExecuteIndirectDGC(const ExecuteIndirectDGCDesc& desc)
 {
     if (

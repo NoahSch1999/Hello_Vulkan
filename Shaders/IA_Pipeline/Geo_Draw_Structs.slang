@@ -5,8 +5,8 @@
 struct Payload
 {
     uint MeshletIndex[32];
-    uint InstanceIndex[32];
-    uint MeshletCount[32];
+    uint InstanceIndex;
+    uint MeshletCount;
 };
 
 // MESH ASSET STRUCTS

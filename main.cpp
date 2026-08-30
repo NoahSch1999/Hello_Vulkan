@@ -126,7 +126,8 @@ struct RenderingVariables
         iaBuffer,
         meshDataBuffer,
         instanceCullDataBuffer,
-        drawMetadataBuffer
+        drawMetadataBuffer,
+        scratchBuffer
         ;
 };
 
@@ -216,17 +217,23 @@ void SetupRenderingPasses(RenderAPI::Core& core, Compiler::Compiler& compiler, R
     vars.meshDataBuffer = RenderAPI::Buffer(core, passBufferDesc);
 
     passBufferDesc.Name = "iaBuffer";
-    passBufferDesc.UsageBits = RenderAPI::EBufferUsageBits::DeviceAddress | RenderAPI::EBufferUsageBits::Indirect;
+    passBufferDesc.UsageBits = RenderAPI::EBufferUsageBits::DeviceAddress | RenderAPI::EBufferUsageBits::Indirect | RenderAPI::EBufferUsageBits::TransferDst;
     passBufferDesc.Size = 1024 * 1024,
         vars.iaBuffer = RenderAPI::Buffer(core, passBufferDesc);
 
-    aZero::Rendering::MeshTaskIndirectArgs iaData{
-        .GroupX = meshletMeshData.Submeshes[0].MeshletCount, .GroupY = 1, .GroupZ = 1
-    };
+    passBufferDesc.Name = "scratchBuffer";
+    passBufferDesc.UsageBits = RenderAPI::EBufferUsageBits::DeviceAddress | RenderAPI::EBufferUsageBits::TransferSrc;
+    vars.scratchBuffer = RenderAPI::Buffer(core, passBufferDesc);
 
     aZero::Rendering::PBRMaterial material{
         .AlbedoTexture = 0
     };
+
+    vars.scratchBuffer.Upload(0, 0);
+    vars.materialBuffer.Upload(material, 0);
+    vars.meshDataBuffer.Upload(meshletMeshData.Meshlets, 0);
+    vars.meshDataBuffer.Upload(meshletMeshData.Vertices, meshletMeshData.Meshlets.size() * sizeof(meshletMeshData.Meshlets[0]));
+    vars.meshletBoundsBuffer.Upload(meshletMeshData.MeshletBounds, 0);
 
     aZero::Rendering::InstanceData instanceData{
         .WorldMatrix = glm::rotate(glm::mat4(1.0), glm::radians(180.f), glm::vec3(0.f, 1.f, 0.f)),
@@ -240,23 +247,21 @@ void SetupRenderingPasses(RenderAPI::Core& core, Compiler::Compiler& compiler, R
         .WorldSpaceBounds = {
             .Origin = glm::vec3(0.f, 1.f, 0.f),
             .Radius = meshletMeshData.Submeshes[0].Bounds.Radius
-        }
-    };
-
-    aZero::Rendering::DrawMetaData drawData{
-        .InstanceIndex = 0,
+        },
         .MeshletCount = meshletMeshData.Submeshes[0].MeshletCount
     };
 
-    vars.drawMetadataBuffer.Upload(drawData, 0);
-    vars.iaBuffer.Upload(1, 0);
-    vars.iaBuffer.Upload(iaData, sizeof(uint32_t));
-    vars.materialBuffer.Upload(material, 0);
-    vars.meshDataBuffer.Upload(meshletMeshData.Meshlets, 0);
-    vars.meshDataBuffer.Upload(meshletMeshData.Vertices, meshletMeshData.Meshlets.size() * sizeof(meshletMeshData.Meshlets[0]));
-    vars.meshletBoundsBuffer.Upload(meshletMeshData.MeshletBounds, 0);
     vars.instanceDataBuffer.Upload(instanceData, 0);
     vars.instanceCullDataBuffer.Upload(instanceCullData, 0);
+
+    instanceData.MeshletCount = meshletMeshData.Submeshes[1].MeshletCount;
+    instanceData.MeshletBDA = vars.meshDataBuffer.GetDeviceAddress().value() + (VkDeviceAddress)(meshletMeshData.Submeshes[0].MeshletCount * sizeof(meshletMeshData.Meshlets[0]));
+
+    instanceCullData.MeshletCount = meshletMeshData.Submeshes[1].MeshletCount;
+    instanceCullData.WorldSpaceBounds.Radius = meshletMeshData.Submeshes[1].Bounds.Radius;
+
+    vars.instanceDataBuffer.Upload(instanceData, sizeof(instanceData));
+    vars.instanceCullDataBuffer.Upload(instanceCullData, sizeof(instanceCullData));
 }
 
 int main()
@@ -484,49 +489,102 @@ int main()
 
         cb.StartRecording(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
 
-        /*csCullPass.Render(cb, {
+        {
+            RenderAPI::Buffer::TransitionDesc iaTrCpyDesc{
+                .DstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                .DstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                .Offset = 0,
+                .Size = (uint32_t)sizeof(uint32_t)
+            };
+            vars.iaBuffer.Transition(iaTrCpyDesc);
+
+            RenderAPI::Buffer::TransitionDesc sratchTrDesc{
+                .DstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                .DstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT,
+                .Offset = 0,
+                .Size = (uint32_t)sizeof(uint32_t)
+            };
+            vars.scratchBuffer.Transition(sratchTrDesc);
+
+            cb.Barrier({}, {}, { vars.iaBuffer.GetTransition(),  vars.scratchBuffer.GetTransition() });
+            cb.Copy(vars.scratchBuffer, 0, vars.iaBuffer, 0, sizeof(aZero::Rendering::IndirectArgumentCounter));
+
+            RenderAPI::Buffer::TransitionDesc iaTrDesc{
+                .DstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                .DstAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT | VK_ACCESS_2_SHADER_STORAGE_READ_BIT,
+                .Offset = 0,
+                .Size = (uint32_t)vars.iaBuffer.GetDesc().Size
+            };
+            vars.iaBuffer.Transition(iaTrDesc);
+            
+            RenderAPI::Buffer::TransitionDesc drawDataTrDesc{
+                .DstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                .DstAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+                .Offset = 0,
+                .Size = (uint32_t)vars.drawMetadataBuffer.GetDesc().Size
+            };
+            vars.drawMetadataBuffer.Transition(drawDataTrDesc);
+
+            cb.Barrier({}, {}, { vars.iaBuffer.GetTransition(), vars.drawMetadataBuffer.GetTransition() });
+        }
+
+        vars.csCullPass.Render(cb, {
             .GroupX = 1, .GroupY = 1, .GroupZ = 1,
             .DescriptorSets = {},
             .Callback = [&](RenderAPI::CommandBuffer& cb, Pipeline::RenderPass& pass) {
                  aZero::Rendering::InstanceCullPushConstants constants {
-                         .CameraBufferPtr = cameraBuffer.GetDeviceAddress().value() + frameIndex * sizeof(aZero::Rendering::CameraData),
-                         .InstanceCullDataBufferPtr = instanceCullDataBuffer.GetDeviceAddress().value(),
-                         .DrawMetadataBufferPtr = drawMetadataBuffer.GetDeviceAddress().value()
+                        .IndirectArgumentBufferPtr = vars.iaBuffer.GetDeviceAddress().value(),
+                         .CameraBufferPtr = vars.cameraBuffer.GetDeviceAddress().value() + frameIndex * sizeof(aZero::Rendering::CameraData),
+                         .InstanceCullDataBufferPtr = vars.instanceCullDataBuffer.GetDeviceAddress().value(),
+                         .DrawMetadataBufferPtr = vars.drawMetadataBuffer.GetDeviceAddress().value(),
+                         .InstanceCount = 2
                     };
+
+                 cb.SetPushConstants(pass.GetPushConstantBlock("Constants"), constants);
             }
-        });*/
+        });
 
-        VkImageMemoryBarrier2 outputBarriers[2];
-        outputBarriers[0] = {
-                .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+        {
+            VkImageMemoryBarrier2 outputBarriers[2];
+            outputBarriers[0] = {
+                    .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
 
-                // old usage
-                .srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, // what pipeline stage(s) to wait on
-                .srcAccessMask = 0,
+                    // old usage
+                    .srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, // what pipeline stage(s) to wait on
+                    .srcAccessMask = 0,
 
-                // new usage
-                .dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, // what pipeline stage(s) it will be used on
-                .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+                    // new usage
+                    .dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, // what pipeline stage(s) it will be used on
+                    .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
 
-                // how vulkan will treat the image
-                .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED, // i dont care about the old layout
-                .newLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, // ready to be used as an attachment. VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL is a combo of all attachment layouts in one enum
+                    // how vulkan will treat the image
+                    .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED, // i dont care about the old layout
+                    .newLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, // ready to be used as an attachment. VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL is a combo of all attachment layouts in one enum
 
-                .image = swapchain.GetCurrentBackBuffer(),
-                .subresourceRange{.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = 1, .layerCount = 1 }
-        };
+                    .image = swapchain.GetCurrentBackBuffer(),
+                    .subresourceRange{.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = 1, .layerCount = 1 }
+            };
 
-        outputBarriers[1] = depthImage.Get().GetTransition();
+            outputBarriers[1] = depthImage.Get().GetTransition();
 
-        RenderAPI::Buffer::TransitionDesc iaDesc{
-            .DstStageMask = VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT,
-            .DstAccessMask = VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT,
-            .Offset = 0,
-            .Size = (uint32_t)vars.iaBuffer.GetDesc().Size
-        };
-        vars.iaBuffer.Transition(iaDesc);
+            RenderAPI::Buffer::TransitionDesc iaDesc{
+                .DstStageMask = VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT,
+                .DstAccessMask = VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT,
+                .Offset = 0,
+                .Size = (uint32_t)vars.iaBuffer.GetDesc().Size
+            };
+            vars.iaBuffer.Transition(iaDesc);
 
-        cb.Barrier({}, { outputBarriers[0], outputBarriers[1] }, { vars.iaBuffer.GetTransition() });
+            RenderAPI::Buffer::TransitionDesc drawDataTrDesc{
+                .DstStageMask = VK_PIPELINE_STAGE_2_TASK_SHADER_BIT_NV,
+                .DstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT,
+                .Offset = 0,
+                .Size = (uint32_t)vars.drawMetadataBuffer.GetDesc().Size
+            };
+            vars.drawMetadataBuffer.Transition(drawDataTrDesc);
+
+            cb.Barrier({}, { outputBarriers[0], outputBarriers[1] }, { vars.iaBuffer.GetTransition() });
+        }
 
         vars.msRenderPass.Render(
             cb,
@@ -558,14 +616,15 @@ int main()
                          .DrawMetadataBufferPtr = vars.drawMetadataBuffer.GetDeviceAddress().value(),
                          .RenderMode = 0u
                     };
+                    cb.SetPushConstants(pass.GetPushConstantBlock("Constants"), constants);
 
                     RenderAPI::CommandBuffer::ExecuteIndirectDesc exeDesc{
                         .IndirectArgumentBuffer = &vars.iaBuffer,
-                        .IndirectArgumentBufferOffset = (uint32_t)(sizeof(uint32_t)), // Starts after count
+                        .IndirectArgumentBufferOffset = (uint32_t)(sizeof(aZero::Rendering::IndirectArgumentCounter)), // Starts after count
                         .IndirectArgumentStride = (uint32_t)(sizeof(uint32_t) * 3),
                         .CountBuffer = &vars.iaBuffer,
                         .CountBufferOffset = 0,
-                        .MaxDraws = 1
+                        .MaxDraws = 2
                     };
                     cb.ExecuteIndirectMeshTasksCount(exeDesc);
                 }

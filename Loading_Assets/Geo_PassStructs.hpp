@@ -42,6 +42,7 @@ namespace aZero::Rendering
         VkDeviceAddress CameraBufferPtr;
         VkDeviceAddress InstanceCullDataBufferPtr;
         VkDeviceAddress DrawMetadataBufferPtr;
+        uint32_t InstanceCount;
     };
 
     struct MeshTaskIndirectArgs
@@ -49,6 +50,12 @@ namespace aZero::Rendering
         uint32_t GroupX;
         uint32_t GroupY;
         uint32_t GroupZ;
+    };
+
+    struct IndirectArgumentCounter
+    {
+        uint32_t Count;
+        uint32_t Pad[3];
     };
 
     struct DrawMetaData

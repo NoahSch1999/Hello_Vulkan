@@ -137,7 +137,11 @@ namespace aZero::Pipeline
             {
                 descSets.push_back(set->Get());
             }
-            vkCmdBindDescriptorSets(commandBuffer.Get(), VK_PIPELINE_BIND_POINT_COMPUTE, m_Layout, 0, (uint32_t)descSets.size(), descSets.data(), 0, nullptr);
+
+            if (!descSets.empty())
+            {
+                vkCmdBindDescriptorSets(commandBuffer.Get(), VK_PIPELINE_BIND_POINT_COMPUTE, m_Layout, 0, (uint32_t)descSets.size(), descSets.data(), 0, nullptr);
+            }
 
             desc.Callback(commandBuffer, *this);
 

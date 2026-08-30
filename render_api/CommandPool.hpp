@@ -183,6 +183,8 @@ namespace aZero::RenderAPI
 
         void Copy(const BufferToImageCopyDesc& copyDesc, const RenderAPI::Buffer& srcBuffer, const RenderAPI::Image& dstImage);
 
+        void Copy(const RenderAPI::Buffer& srcBuffer, uint32_t srcOffset, const RenderAPI::Buffer& dstBuffer, uint32_t dstOffset, uint32_t size);
+
         VkCommandBuffer Get() const { return m_CommandBuffer; }
 
     private:

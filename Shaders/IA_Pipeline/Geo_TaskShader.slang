@@ -4,7 +4,7 @@ groupshared Payload payload;
 
 [shader("task")]
 [NumThreads(THREAD_COUNT_X, 1, 1)]
-void asMain(uint3 dtid: SV_DispatchThreadID, uint3 gid: SV_GroupThreadID, uint drawIndex : SV_DrawIndex)
+void asMain(uint3 dtid: SV_DispatchThreadID, uint3 gid: SV_GroupThreadID, uint32_t drawIndex : SV_DrawIndex)
 {
     uint32_t drawid = drawIndex;
     DrawMetaData *drawDataBuffer = (DrawMetaData *)Constants.DrawMetadataBufferPtr;
@@ -27,8 +27,8 @@ void asMain(uint3 dtid: SV_DispatchThreadID, uint3 gid: SV_GroupThreadID, uint d
             uint index = WavePrefixCountBits(visible);
 
             payload.MeshletIndex[index] = dtid.x;
-            payload.InstanceIndex[index] = drawData.InstanceIndex;
-            payload.MeshletCount[index] = drawData.MeshletCount;
+            payload.InstanceIndex = drawData.InstanceIndex;
+            payload.MeshletCount = drawData.MeshletCount;
         }
     }
     

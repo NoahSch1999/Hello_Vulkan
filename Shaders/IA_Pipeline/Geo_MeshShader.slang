@@ -11,10 +11,10 @@ void msMain(
     out indices uint3 tris[g_PrimitivesPerMeshlet]
 )
 {
-    if (payload.MeshletCount[meshletIndex] > meshletIndex)
+    if (payload.MeshletCount > meshletIndex)
     {
         InstanceData *instanceDataBuffer = (InstanceData *)Constants.InstanceDataBufferPtr;
-        InstanceData instanceData = instanceDataBuffer[payload.InstanceIndex[meshletIndex]];
+        InstanceData instanceData = instanceDataBuffer[payload.InstanceIndex];
 
         Meshlet *meshletBuffer = (Meshlet *)instanceData.MeshletBDA;
         const uint vertexCount = meshletBuffer[payload.MeshletIndex[meshletIndex]].VertexCount;

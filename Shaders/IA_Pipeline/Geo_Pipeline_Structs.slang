@@ -40,6 +40,7 @@ struct InstanceCullPushConstants
     uint64_t CameraBufferPtr;
     uint64_t InstanceCullDataBufferPtr;
     uint64_t DrawMetadataBufferPtr;
+    uint32_t InstanceCount;
 };
 
 struct MeshTaskIndirectArgs
