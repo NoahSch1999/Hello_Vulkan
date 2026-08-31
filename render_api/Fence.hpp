@@ -76,8 +76,6 @@ namespace aZero::RenderAPI
 
         VkFence Get() const { return m_Fence; }
 
-        // todo Impl foo's
-
     private:
         RenderAPI::Core* m_diCore = nullptr;
         VkFence m_Fence;

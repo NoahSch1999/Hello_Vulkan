@@ -39,7 +39,7 @@ namespace aZero::File
 					return {};
 				}
 
-				imageData.Format = isSRGB ? aZero::RenderAPI::EImageFormat::BC7_UNORM_SRGB : aZero::RenderAPI::EImageFormat::BC7_UNORM;
+				imageData.Format = isSRGB ? aZero::RenderAPI::EImageFormat::VK_FORMAT_BC7_SRGB_BLOCK : aZero::RenderAPI::EImageFormat::VK_FORMAT_BC7_UNORM_BLOCK;
 			}
 			else {
 				imageData.Format = aZero::RenderAPI::FromVK_Format(ktxTex->vkFormat);
@@ -92,8 +92,8 @@ namespace aZero::File
 				imageData.MipLevels[mip].Offset = offset;
 				imageData.MipLevels[mip].SlicePitch = size;
 
-				if (imageData.Format == aZero::RenderAPI::EImageFormat::BC7_UNORM ||
-					imageData.Format == aZero::RenderAPI::EImageFormat::BC7_UNORM_SRGB)
+				if (imageData.Format == aZero::RenderAPI::EImageFormat::VK_FORMAT_BC7_UNORM_BLOCK ||
+					imageData.Format == aZero::RenderAPI::EImageFormat::VK_FORMAT_BC7_SRGB_BLOCK)
 				{
 					// BC7 - Stores the texture in blocks of 16 bytes.
 					// We calculate the number of blocks and multiply by 16 to get the width.
@@ -157,11 +157,11 @@ namespace aZero::File
 
 			if (path.filename().generic_string().ends_with(std::string("_BaseColor") + path.extension().generic_string()))
 			{
-				imageData.Format = aZero::RenderAPI::EImageFormat::RGBA8_UNORM_SRGB;
+				imageData.Format = aZero::RenderAPI::EImageFormat::VK_FORMAT_R8G8B8A8_SRGB;
 			}
 			else
 			{
-				imageData.Format = aZero::RenderAPI::EImageFormat::RGBA8_UNORM;
+				imageData.Format = aZero::RenderAPI::EImageFormat::VK_FORMAT_R8G8B8A8_UNORM;
 			}
 
 			stbi_image_free(loadedImage);
@@ -198,11 +198,11 @@ namespace aZero::File
 
 		if (path.filename().generic_string().ends_with(std::string("_BaseColor") + path.extension().generic_string()))
 		{
-			imageData.Format = aZero::RenderAPI::EImageFormat::RGBA8_UNORM_SRGB;
+			imageData.Format = aZero::RenderAPI::EImageFormat::VK_FORMAT_R8G8B8A8_SRGB;
 		}
 		else
 		{
-			imageData.Format = aZero::RenderAPI::EImageFormat::RGBA8_UNORM;
+			imageData.Format = aZero::RenderAPI::EImageFormat::VK_FORMAT_R8G8B8A8_UNORM;
 		}
 
 		return imageData;

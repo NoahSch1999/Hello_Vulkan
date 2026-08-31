@@ -5,7 +5,8 @@
 
 namespace aZero::RenderAPI
 {
-    enum class EMemoryType { BestFit, VRAM_Only, SYSRAM_Only, Readback };
+    enum class EMemoryType { BestFit, VideoMemory, SystemMemory, Readback};
+
     enum class EBufferUsageBits : uint32_t { 
         TransferSrc = VkBufferUsageFlagBits::VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
         TransferDst = VkBufferUsageFlagBits::VK_BUFFER_USAGE_TRANSFER_DST_BIT,
@@ -41,9 +42,9 @@ namespace aZero::RenderAPI
         {
         case EMemoryType::BestFit:
             return VmaMemoryUsage::VMA_MEMORY_USAGE_AUTO;
-        case EMemoryType::VRAM_Only:
+        case EMemoryType::VideoMemory:
             return VmaMemoryUsage::VMA_MEMORY_USAGE_GPU_ONLY;
-        case EMemoryType::SYSRAM_Only:
+        case EMemoryType::SystemMemory:
             return VmaMemoryUsage::VMA_MEMORY_USAGE_CPU_ONLY;
         case EMemoryType::Readback:
             return VmaMemoryUsage::VMA_MEMORY_USAGE_GPU_TO_CPU;
@@ -95,6 +96,7 @@ namespace aZero::RenderAPI
             this->Init(core, desc);
         }
 
+        // todo: Impl fail-safe
         void Init(Core& core, const Desc& desc)
         {
             VkDeviceSize size{ desc.Size };
@@ -105,6 +107,7 @@ namespace aZero::RenderAPI
                 .usage = (VkBufferUsageFlags)desc.UsageBits
             };
 
+            // todo: Make flags setting in combo with memory type
             VmaAllocationCreateInfo allocCI{
                 .flags = desc.SeperateHeap ? (VmaAllocationCreateFlags)(VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT) 
                     : (VmaAllocationCreateFlags)(VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_ALLOW_TRANSFER_INSTEAD_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT),
@@ -136,17 +139,6 @@ namespace aZero::RenderAPI
                     std::cout << "Failed to enable debug name extension.\n";
                 }
             }
-
-            /*std::cout << desc.Name << ":\n";
-            VkMemoryPropertyFlags props{};
-            vmaGetAllocationMemoryProperties(
-                core.GetVmaAllocator(),
-                m_Allocation,
-                &props
-            );
-
-            printf("memory props: 0x%x\n", props);
-            printf("mapped: %p\n", m_AllocationInfo.pMappedData);*/
 
             m_LastBarrier = {};
 

@@ -48,7 +48,7 @@ namespace aZero::RenderAPI
             }
 
             RenderAPI::Image::Desc imageDesc{
-                .Format = RenderAPI::EImageFormat::D24S8_UINT,
+                .Format = RenderAPI::EImageFormat::VK_FORMAT_D24_UNORM_S8_UINT,
                 .Type = RenderAPI::EImageType::Image2D,
                 .Usage = RenderAPI::EImageUsageBits::DepthStencil_Attachment,
                 .Width = desc.Width, .Height = desc.Height, .Depth = 1u, .MipCount = 1u, .ArrayLayers = 1u

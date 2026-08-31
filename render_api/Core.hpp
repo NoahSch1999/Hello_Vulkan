@@ -212,7 +212,7 @@ namespace aZero::RenderAPI
 			std::vector<VkQueueFamilyProperties> queueFamilies(queueFamilyCount);
 			vkGetPhysicalDeviceQueueFamilyProperties(m_PhysicalDevice, &queueFamilyCount, queueFamilies.data());
 
-			for (size_t i = 0; i < queueFamilies.size(); i++) { // TODO: Fix bug if queue supports multi-type
+			for (size_t i = 0; i < queueFamilies.size(); i++) { // todo: Fix bug if queue supports multi-type
 				if (queueFamilies[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) {
 					m_GraphicsQueueIndex = i;
 					continue;
@@ -226,10 +226,10 @@ namespace aZero::RenderAPI
 					continue;
 				}
 			}
-			//chk(SDL_Vulkan_GetPresentationSupport(instance, physicalDevices[deviceIndex], queueFamily));
+			//chk(SDL_Vulkan_GetPresentationSupport(instance, physicalDevices[deviceIndex], queueFamily)); // todo Needed?
 
 			// configure features
-			const std::vector<const char*> deviceExtensions{ 
+			const std::vector<const char*> deviceExtensions{ // todo Support additional extensions through init args
 				VK_KHR_SWAPCHAIN_EXTENSION_NAME, 
 				VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME, 
 				VK_EXT_MESH_SHADER_EXTENSION_NAME,
@@ -288,6 +288,7 @@ namespace aZero::RenderAPI
 			return true;
 		}
 
+		// todo: Handle support-results
 		bool HandleFeatures(
 			VkDeviceCreateInfo& createInfo,
 			VkPhysicalDeviceFeatures2& supportedFeatures,

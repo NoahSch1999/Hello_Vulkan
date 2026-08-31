@@ -40,7 +40,7 @@ namespace aZero::RenderAPI
             std::vector<SubmitSemaphore> SignalSemaphores; // Signalled when the stage has
         };
 
-        // todo Impl foo's
+        // todo: Impl fail-safe
         void SubmitCommandBuffers(const SubmitDesc& submitDesc)
         {
             std::vector<VkSemaphoreSubmitInfo> WaitOnSemaphores_BinaryVec(submitDesc.WaitOnSemaphores.size());

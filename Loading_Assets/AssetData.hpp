@@ -9,21 +9,22 @@ namespace aZero::RenderAPI
 {
 	inline EImageFormat FromVK_Format(ktx_uint32_t format)
 	{
-		switch (format)
-		{
-			// VK_FORMAT_R8G8B8A8_UNORM
-		case 37:
-			return EImageFormat::RGBA8_UNORM;
-			// VK_FORMAT_R8G8B8A8_SRGB 
-		case 43:
-			return EImageFormat::RGBA8_UNORM_SRGB;
-		case 145:
-			return EImageFormat::BC7_UNORM;
-		case 146:
-			return EImageFormat::BC7_UNORM_SRGB;
-		default:
-			return EImageFormat::UNKNOWN;
-		}
+		return (EImageFormat)format;
+		//switch (format)
+		//{
+		//	// VK_FORMAT_R8G8B8A8_UNORM
+		//case 37:
+		//	return EImageFormat::RGBA8_UNORM;
+		//	// VK_FORMAT_R8G8B8A8_SRGB 
+		//case 43:
+		//	return EImageFormat::RGBA8_UNORM_SRGB;
+		//case 145:
+		//	return EImageFormat::BC7_UNORM;
+		//case 146:
+		//	return EImageFormat::BC7_UNORM_SRGB;
+		//default:
+		//	return EImageFormat::UNKNOWN;
+		//}
 	}
 }
 

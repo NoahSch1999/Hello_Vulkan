@@ -44,6 +44,7 @@ namespace aZero::RenderAPI
             this->Init(core, desc);
         }
 
+        // todo: Impl fail-safe
         void Init(Core& core, const Desc& desc)
         {
             VkFilter filterMode =

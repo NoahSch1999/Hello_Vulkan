@@ -5,28 +5,11 @@
 
 namespace aZero::RenderAPI
 {
-    enum class EImageFormat {
-        RGBA8_UNORM,
-        RGBA8_UNORM_SRGB,
-        BGRA8_UNORM,
-        BGRA8_UNORM_SRGB,
-        BC7_UNORM,
-        BC7_UNORM_SRGB,
-        RGB32_FLOAT,
-        RGB32_UINT,
-        RGB32_SINT,
-        RGBA32_FLOAT,
-        RGBA32_UINT,
-        RGBA32_SINT,
-        RGBA16_FLOAT,
-        RGBA16_UINT,
-        RGBA16_SINT,
-        RGBA16_UNORM,
-        D24S8_UINT,
-        UNKNOWN
-    };
 
-    enum class EImageType {
+    using EImageFormat = VkFormat;
+
+    enum class EImageType : std::uint32_t
+    {
         Image1D,
         Image1D_Array,
         Image2D,
@@ -36,14 +19,14 @@ namespace aZero::RenderAPI
         Image3D
     };
 
-    enum class EImageUsageBits : std::uint32_t
+    enum class EImageUsageBits : VkImageUsageFlags
     {
-        TransferSrc = 0x00000001,
-        TransferDst = 0x00000002,
-        Sampled = 0x00000004,
-        Storage = 0x00000008,
-        Color_Attachment = 0x00000010,
-        DepthStencil_Attachment = 0x00000020
+        TransferSrc = VkImageUsageFlagBits::VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+        TransferDst = VkImageUsageFlagBits::VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+        Sampled = VkImageUsageFlagBits::VK_IMAGE_USAGE_SAMPLED_BIT,
+        Storage = VkImageUsageFlagBits::VK_IMAGE_USAGE_STORAGE_BIT,
+        Color_Attachment = VkImageUsageFlagBits::VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+        DepthStencil_Attachment = VkImageUsageFlagBits::VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT
     };
 
     constexpr EImageUsageBits operator|(EImageUsageBits lhs, EImageUsageBits rhs)
@@ -51,14 +34,14 @@ namespace aZero::RenderAPI
         return static_cast<EImageUsageBits>(
             static_cast<std::uint32_t>(lhs) |
             static_cast<std::uint32_t>(rhs));
-    }
+    };
 
-    enum EImageAspect : std::uint32_t 
+    enum EImageAspect : VkImageAspectFlags
     {
-        Color = 0x00000001,
-        Depth = 0x00000002,
-        Stencil = 0x00000004,
-        DepthStencil = Depth | Stencil
+        Color = VkImageAspectFlagBits::VK_IMAGE_ASPECT_COLOR_BIT,
+        Depth = VkImageAspectFlagBits::VK_IMAGE_ASPECT_DEPTH_BIT,
+        Stencil = VkImageAspectFlagBits::VK_IMAGE_ASPECT_STENCIL_BIT,
+        DepthStencil = VkImageAspectFlagBits::VK_IMAGE_ASPECT_DEPTH_BIT | VkImageAspectFlagBits::VK_IMAGE_ASPECT_STENCIL_BIT
     };
 
     constexpr EImageAspect operator|(EImageAspect lhs, EImageAspect rhs)
@@ -71,7 +54,8 @@ namespace aZero::RenderAPI
     // IF VULKAN!
     inline VkFormat ToVK_ImageFormat(EImageFormat format)
     {
-        switch (format)
+        return format;
+        /*switch (format)
         {
         case EImageFormat::RGBA8_UNORM:
             return VkFormat::VK_FORMAT_R8G8B8A8_UNORM;
@@ -89,10 +73,10 @@ namespace aZero::RenderAPI
             return VkFormat::VK_FORMAT_D24_UNORM_S8_UINT;
         default:
             return VkFormat::VK_FORMAT_UNDEFINED;
-        }
+        }*/
     }
 
-    inline VkImageType ToVK_ImageType(EImageType type)
+    inline VkImageType ToVK_ImageType(EImageType type) // todo: Get rid of this
     {
         switch (type)
         {
@@ -112,7 +96,7 @@ namespace aZero::RenderAPI
         }
     }
 
-    inline VkImageViewType ToVK_ImageViewType(EImageType type)
+    inline VkImageViewType ToVK_ImageViewType(EImageType type) // todo: Get rid of this
     {
         switch (type)
         {
@@ -179,6 +163,7 @@ namespace aZero::RenderAPI
             this->Init(core, desc);
         }
 
+        // todo: Impl fail-safe behaviour
         void Init(Core& core, const Desc& desc)
         {
             // create depth image

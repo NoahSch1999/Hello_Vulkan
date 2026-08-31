@@ -11,6 +11,7 @@
 
 namespace aZero::RenderAPI
 {
+	// todo Impl support for more formats
 	inline uint32_t GetFormatStride(VkFormat format)
 	{
 		switch (format)

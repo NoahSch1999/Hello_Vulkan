@@ -86,8 +86,8 @@ namespace aZero::RenderAPI
         void StartRecording(VkCommandBufferUsageFlags flags) const
         {
             VkCommandBufferBeginInfo cbBI{
-            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-            .flags = flags
+                .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+                .flags = flags
             };
             chkSucceed(vkBeginCommandBuffer(m_CommandBuffer, &cbBI));
         }
@@ -121,14 +121,9 @@ namespace aZero::RenderAPI
             uint32_t FirstInstance = 0;
         };
 
-        void DrawIndexed(
-            uint32_t indexCount,
-            uint32_t instanceCount,
-            uint32_t firstIndex,
-            int32_t  vertexOffset,
-            uint32_t firstInstance) const
+        void DrawIndexed(const DrawIndexedDesc& drawDesc) const
         {
-            vkCmdDrawIndexed(m_CommandBuffer, indexCount, instanceCount, firstIndex, vertexOffset, firstInstance);
+            vkCmdDrawIndexed(m_CommandBuffer, drawDesc.IndexCount, drawDesc.InstanceCount, drawDesc.FirstIndex, drawDesc.VertexOffset, drawDesc.FirstInstance);
         }
 
         void DispatchMesh(uint32_t tgx, uint32_t tgy, uint32_t tgz)

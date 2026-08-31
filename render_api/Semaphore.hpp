@@ -36,6 +36,7 @@ namespace aZero::RenderAPI
             this->Init(core, type);
         }
 
+        // todo: Impl fail-safe
         void Init(Core& core, ESemaphoreType type)
         {
             VkSemaphoreCreateInfo semaphoreCI{
@@ -61,7 +62,6 @@ namespace aZero::RenderAPI
 
         VkSemaphore Get() const { return m_Semaphore; }
         ESemaphoreType GetType() const { return m_Type; }
-        // todo Impl foo's
 
         // -----------------------------------------------------------------
         // TIMELINE SEMAPHORE

@@ -317,7 +317,7 @@ int main()
 
     RenderAPI::Swapchain::Desc swapChainDesc{
         .Surface = surface,
-        .Format = RenderAPI::EImageFormat::BGRA8_UNORM_SRGB,
+        .Format = RenderAPI::EImageFormat::VK_FORMAT_B8G8R8A8_SRGB,
         .FramesInFlight = 3,
         .Width = (uint32_t)window.GetClientDimensions()[0],
         .Height = (uint32_t)window.GetClientDimensions()[1]
