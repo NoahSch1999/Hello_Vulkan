@@ -27,7 +27,7 @@ namespace aZero::RenderAPI
             this->Init(core, desc);
         }
 
-        void Init(Core& core, const Desc& desc)
+        bool Init(Core& core, const Desc& desc)
         {
             std::vector<VkFormat> depthFormats{ VK_FORMAT_D24_UNORM_S8_UINT };
             VkFormat depthFormat{ VK_FORMAT_UNDEFINED };
@@ -48,13 +48,13 @@ namespace aZero::RenderAPI
             }
 
             RenderAPI::Image::Desc imageDesc{
-                .Format = RenderAPI::EImageFormat::VK_FORMAT_D24_UNORM_S8_UINT,
-                .Type = RenderAPI::EImageType::Image2D,
-                .Usage = RenderAPI::EImageUsageBits::DepthStencil_Attachment,
+                .Format = VkFormat::VK_FORMAT_D24_UNORM_S8_UINT,
+                .Type = VkImageType::VK_IMAGE_TYPE_2D,
+                .Usage = VkImageUsageFlagBits::VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
                 .Width = desc.Width, .Height = desc.Height, .Depth = 1u, .MipCount = 1u, .ArrayLayers = 1u
             };
 
-            m_Image = RenderAPI::Image(core, imageDesc);
+            return m_Image.Init(core, imageDesc);
         }
 
         RenderAPI::Image& Get() { return m_Image; }

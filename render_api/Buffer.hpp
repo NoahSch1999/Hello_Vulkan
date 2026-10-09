@@ -5,9 +5,9 @@
 
 namespace aZero::RenderAPI
 {
-    enum class EMemoryType { BestFit, VideoMemory, SystemMemory, Readback};
+    //enum class EMemoryType { BestFit, VideoMemory, SystemMemory, Readback};
 
-    enum class EBufferUsageBits : uint32_t { 
+    /*enum class EBufferUsageBits : uint32_t {
         TransferSrc = VkBufferUsageFlagBits::VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
         TransferDst = VkBufferUsageFlagBits::VK_BUFFER_USAGE_TRANSFER_DST_BIT,
         Uniform = VkBufferUsageFlagBits::VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
@@ -16,9 +16,9 @@ namespace aZero::RenderAPI
         Vertex = VkBufferUsageFlagBits::VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
         Indirect = VkBufferUsageFlagBits::VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT,
         DeviceAddress = VkBufferUsageFlagBits::VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT
-    };
+    };*/
     
-    constexpr EBufferUsageBits operator|(EBufferUsageBits lhs, EBufferUsageBits rhs)
+    /*constexpr EBufferUsageBits operator|(EBufferUsageBits lhs, EBufferUsageBits rhs)
     {
         return static_cast<EBufferUsageBits>(
             static_cast<std::uint64_t>(lhs) |
@@ -51,7 +51,7 @@ namespace aZero::RenderAPI
         default:
             return VmaMemoryUsage::VMA_MEMORY_USAGE_MAX_ENUM;
         }
-    }
+    }*/
 
     class Buffer : public DeleteCopy
     {
@@ -59,8 +59,8 @@ namespace aZero::RenderAPI
         struct Desc
         {
             uint64_t Size;
-            EBufferUsageBits UsageBits;
-            EMemoryType MemoryType = EMemoryType::BestFit;
+            VkBufferUsageFlags UsageBits;
+            VmaMemoryUsage MemoryType;
             bool SeperateHeap = false;
             std::string Name;
         };
@@ -96,8 +96,7 @@ namespace aZero::RenderAPI
             this->Init(core, desc);
         }
 
-        // todo: Impl fail-safe
-        void Init(Core& core, const Desc& desc)
+        bool Init(Core& core, const Desc& desc)
         {
             VkDeviceSize size{ desc.Size };
 
@@ -111,39 +110,44 @@ namespace aZero::RenderAPI
             VmaAllocationCreateInfo allocCI{
                 .flags = desc.SeperateHeap ? (VmaAllocationCreateFlags)(VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT) 
                     : (VmaAllocationCreateFlags)(VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_ALLOW_TRANSFER_INSTEAD_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT),
-                .usage = ToVmaMemoryType(desc.MemoryType) /*VmaMemoryUsage::VMA_MEMORY_USAGE_AUTO*/
+                .usage = desc.MemoryType
             };
 
-            chkSucceed(vmaCreateBuffer(core.GetVmaAllocator(), &bufferCI, &allocCI, &m_Buffer, &m_Allocation, &m_AllocationInfo));
+            const bool succeeded = chkSucceed(vmaCreateBuffer(core.GetVmaAllocator(), &bufferCI, &allocCI, &m_Buffer, &m_Allocation, &m_AllocationInfo));
 
-            if (bufferCI.usage & VkBufferUsageFlagBits::VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT)
+            if (succeeded)
             {
-                VkBufferDeviceAddressInfo bdaInfo{
-                    .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
-                    .buffer = m_Buffer
-                };
-                m_DeviceAddress = vkGetBufferDeviceAddress(core.GetLogicalDevice(), &bdaInfo);
-            }
-
-            if (!desc.Name.empty() && core.IsDebugNamesSupported())
-            {
-                VkDebugUtilsObjectNameInfoEXT nameInfo{};
-                nameInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT;
-                nameInfo.objectType = VK_OBJECT_TYPE_BUFFER;
-                nameInfo.objectHandle = (uint64_t)m_Buffer;
-                nameInfo.pObjectName = desc.Name.c_str();
-
-                const VkResult enableDebugNamesRes = vkSetDebugUtilsObjectNameEXT(core.GetLogicalDevice(), &nameInfo);
-                if (enableDebugNamesRes != VK_SUCCESS)
+                if (bufferCI.usage & VkBufferUsageFlagBits::VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT)
                 {
-                    std::cout << "Failed to enable debug name extension.\n";
+                    VkBufferDeviceAddressInfo bdaInfo{
+                        .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
+                        .buffer = m_Buffer
+                    };
+                    m_DeviceAddress = vkGetBufferDeviceAddress(core.GetLogicalDevice(), &bdaInfo);
                 }
+
+                if (!desc.Name.empty() && core.IsDebugNamesSupported())
+                {
+                    VkDebugUtilsObjectNameInfoEXT nameInfo{};
+                    nameInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT;
+                    nameInfo.objectType = VK_OBJECT_TYPE_BUFFER;
+                    nameInfo.objectHandle = (uint64_t)m_Buffer;
+                    nameInfo.pObjectName = desc.Name.c_str();
+
+                    const VkResult enableDebugNamesRes = vkSetDebugUtilsObjectNameEXT(core.GetLogicalDevice(), &nameInfo);
+                    if (enableDebugNamesRes != VK_SUCCESS)
+                    {
+                        std::cout << "Failed to enable debug name extension.\n";
+                    }
+                }
+
+                m_LastBarrier = {};
+
+                m_Desc = desc;
+                m_diCore = &core;
             }
 
-            m_LastBarrier = {};
-
-            m_Desc = desc;
-            m_diCore = &core;
+            return succeeded;
         }
 
         template<typename T> requires std::is_trivially_copyable_v<T>

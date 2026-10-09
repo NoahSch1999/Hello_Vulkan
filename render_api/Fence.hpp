@@ -32,7 +32,7 @@ namespace aZero::RenderAPI
             this->Init(core, startAsSignalled);
         }
 
-        void Init(Core& core, bool startAsSignalled = false)
+        bool Init(Core& core, bool startAsSignalled = false)
         {
             VkFenceCreateInfo fenceCI{
                 .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO
@@ -41,9 +41,12 @@ namespace aZero::RenderAPI
             {
                 fenceCI.flags = VK_FENCE_CREATE_SIGNALED_BIT;
             }
-            chkSucceed(vkCreateFence(core.GetLogicalDevice(), &fenceCI, nullptr, &m_Fence));
-
-            m_diCore = &core;
+            const bool succeeded = chkSucceed(vkCreateFence(core.GetLogicalDevice(), &fenceCI, nullptr, &m_Fence));
+            if(succeeded)
+            {
+                m_diCore = &core;
+            }
+            return succeeded;
         }
 
         void WaitFor(uint64_t timeout = UINT64_MAX)

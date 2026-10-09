@@ -85,8 +85,6 @@ namespace aZero::RenderAPI
             vkUpdateDescriptorSets(m_diCore->GetLogicalDevice(), writeDescs.size(), writeDescs.data(), 0, nullptr);
         }
 
-        // todo Impl DescriptorHandle creation function that combines ::UpdateDescriptor() with an index freelist
-
         VkDescriptorSet Get() const { return m_Set; }
         VkDescriptorSetLayout GetLayout() const { return m_Layout; }
 
@@ -106,7 +104,6 @@ namespace aZero::RenderAPI
         RenderAPI::Core* m_diCore = nullptr;
     };
 
-    // todo Make it support other type of descriptors than VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
     class DescriptorPool : public DeleteCopy
     {
     public:
@@ -186,7 +183,7 @@ namespace aZero::RenderAPI
             return DescriptorSet(*m_diCore, *this, set, layout, desc);
         }
 
-        void Init(Core& core, const Desc& desc)
+        bool Init(Core& core, const Desc& desc)
         {
             std::vector<VkDescriptorPoolSize> sets(desc.Sets.size());
             for (uint32_t i = 0; i < sets.size(); i++)
@@ -201,10 +198,13 @@ namespace aZero::RenderAPI
                 .poolSizeCount = static_cast<uint32_t>(sets.size()),
                 .pPoolSizes = sets.data()
             };
-            chkSucceed(vkCreateDescriptorPool(core.GetLogicalDevice(), &descPoolCI, nullptr, &m_DescriptorPool));
-
-            m_diCore = &core;
-            m_Desc = desc;
+            const bool succeeded = chkSucceed(vkCreateDescriptorPool(core.GetLogicalDevice(), &descPoolCI, nullptr, &m_DescriptorPool));
+            if(succeeded)
+            {
+                m_diCore = &core;
+                m_Desc = desc;
+            }
+            return succeeded;
         }
 
         VkDescriptorPool Get() const { return m_DescriptorPool; }

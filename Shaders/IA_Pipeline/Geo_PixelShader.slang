@@ -117,7 +117,6 @@ Output psMain(RasterVertex pin)
         // --------------------------------------------------------------------------------------------
     }
 
-    // todo Normal pass calculations
     output.color = float4(sampledAlbedo, 1.f);
     return output;
 }

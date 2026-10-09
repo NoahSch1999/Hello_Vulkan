@@ -205,7 +205,7 @@ namespace aZero::Package
 
 			uint32_t format;
 			std::memcpy(&format, &data[offset], sizeof(uint32_t));
-			image.Format = static_cast<aZero::RenderAPI::EImageFormat>(format);
+			image.Format = static_cast<VkFormat>(format);
 			offset += sizeof(uint32_t);
 			std::memcpy(&image.Type, &data[offset], sizeof(uint32_t));
 		}
@@ -268,7 +268,7 @@ namespace aZero::Package
 					assetEntry.UUIDs.push_back({});
 					std::memcpy(&assetEntry.UUIDs[assetEntry.UUIDs.size() - 1], asset.UUID.data(), aZero::Helper::UUID::GetSizeAsString());
 				}
-				this->WriteAsset(asset, file); // todo Impl
+				this->WriteAsset(asset, file);
 			}
 		}
 

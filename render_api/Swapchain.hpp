@@ -22,7 +22,7 @@ namespace aZero::RenderAPI
         struct Desc
         {
             VkSurfaceKHR Surface;
-            EImageFormat Format;
+            VkFormat Format;
             uint32_t FramesInFlight;
             uint32_t Width, Height;
         };
@@ -66,11 +66,14 @@ namespace aZero::RenderAPI
             this->Init(core, desc);
         }
 
-		void Init(Core& core, const Desc& desc)
+		bool Init(Core& core, const Desc& desc)
 		{
             // get surface properties
             VkSurfaceCapabilitiesKHR surfaceCaps{};
-            chkSucceed(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(core.GetPhysicalDevice(), desc.Surface, &surfaceCaps));
+            if (!chkSucceed(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(core.GetPhysicalDevice(), desc.Surface, &surfaceCaps)))
+            {
+                return false;
+            }
 
             // get surface extents. On "Wayland" 0xFFFFFFFF means that we need to choose the dimensions
             VkExtent2D swapchainExtent{ surfaceCaps.currentExtent };
@@ -83,7 +86,7 @@ namespace aZero::RenderAPI
                 .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
                 .surface = desc.Surface,
                 .minImageCount = desc.FramesInFlight,
-                .imageFormat = RenderAPI::ToVK_ImageFormat(desc.Format),
+                .imageFormat = desc.Format,
                 .imageColorSpace = VK_COLORSPACE_SRGB_NONLINEAR_KHR,
                 .imageExtent = extents,
                 .imageArrayLayers = 1,
@@ -93,20 +96,32 @@ namespace aZero::RenderAPI
                 .presentMode = VK_PRESENT_MODE_IMMEDIATE_KHR
             };
 
-            chkSucceed(vkCreateSwapchainKHR(core.GetLogicalDevice(), &swapchainCI, nullptr, &m_Swapchain));
+            if(!chkSucceed(vkCreateSwapchainKHR(core.GetLogicalDevice(), &swapchainCI, nullptr, &m_Swapchain)))
+            {
+                return false;
+            }
 
             uint32_t imageCount{ 0 };
-            chkSucceed(vkGetSwapchainImagesKHR(core.GetLogicalDevice(), m_Swapchain, &imageCount, nullptr));
+            if(!chkSucceed(vkGetSwapchainImagesKHR(core.GetLogicalDevice(), m_Swapchain, &imageCount, nullptr)))
+            {
+                return false;
+            }
 
             m_BackBuffers.resize(imageCount);
-            chkSucceed(vkGetSwapchainImagesKHR(core.GetLogicalDevice(), m_Swapchain, &imageCount, m_BackBuffers.data()));
+            if(!chkSucceed(vkGetSwapchainImagesKHR(core.GetLogicalDevice(), m_Swapchain, &imageCount, m_BackBuffers.data())))
+            {
+                return false;
+            }
 
             m_BackBufferViews.resize(imageCount);
             m_ImageReadySemaphores.resize(imageCount);
             m_RenderCompleteSemaphores.resize(imageCount);
             for (auto i = 0; i < imageCount; i++) {
-                VkImageViewCreateInfo viewCI{ .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, .image = m_BackBuffers[i], .viewType = VK_IMAGE_VIEW_TYPE_2D, .format = RenderAPI::ToVK_ImageFormat(desc.Format), .subresourceRange{.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = 1, .layerCount = 1 } };
-                chkSucceed(vkCreateImageView(core.GetLogicalDevice(), &viewCI, nullptr, &m_BackBufferViews[i]));
+                VkImageViewCreateInfo viewCI{ .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, .image = m_BackBuffers[i], .viewType = VK_IMAGE_VIEW_TYPE_2D, .format = desc.Format, .subresourceRange{.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = 1, .layerCount = 1 } };
+                if(!chkSucceed(vkCreateImageView(core.GetLogicalDevice(), &viewCI, nullptr, &m_BackBufferViews[i])))
+                {
+                    return false;
+                }
                 m_ImageReadySemaphores[i] = RenderAPI::Semaphore(core, RenderAPI::ESemaphoreType::Binary);
                 m_RenderCompleteSemaphores[i] = RenderAPI::Semaphore(core, RenderAPI::ESemaphoreType::Binary);
             }
@@ -114,6 +129,7 @@ namespace aZero::RenderAPI
             m_Surface = desc.Surface;
             m_CreateInfo = swapchainCI;
             m_diCore = &core;
+            return true;
 		}
 
         void Resize(uint32_t width, uint32_t height)

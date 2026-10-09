@@ -39,25 +39,26 @@ namespace aZero::File
 					return {};
 				}
 
-				imageData.Format = isSRGB ? aZero::RenderAPI::EImageFormat::VK_FORMAT_BC7_SRGB_BLOCK : aZero::RenderAPI::EImageFormat::VK_FORMAT_BC7_UNORM_BLOCK;
+				
+				imageData.Format = isSRGB ? VkFormat::VK_FORMAT_BC7_SRGB_BLOCK : VkFormat::VK_FORMAT_BC7_UNORM_BLOCK;
 			}
 			else {
-				imageData.Format = aZero::RenderAPI::FromVK_Format(ktxTex->vkFormat);
+				imageData.Format = (VkFormat)ktxTex->vkFormat;
 			}
 
 			if (ktxTex->isCubemap) {
-				imageData.Type = ktxTex->isArray ? aZero::RenderAPI::EImageType::ImageCube_Array : aZero::RenderAPI::EImageType::ImageCube;
+				imageData.Type = VkImageType::VK_IMAGE_TYPE_3D; // todo: Handle array type? ktxTex->isArray
 			}
 			else
 			{
 				if (ktxTex->baseDepth > 1) {
-					imageData.Type = aZero::RenderAPI::EImageType::Image3D;
+					imageData.Type = VkImageType::VK_IMAGE_TYPE_3D; // todo: Handle array type? ktxTex->isArray
 				}
 				else if (ktxTex->baseHeight > 1) {
-					imageData.Type = ktxTex->isArray ? aZero::RenderAPI::EImageType::Image2D_Array : aZero::RenderAPI::EImageType::Image2D;
+					imageData.Type = VkImageType::VK_IMAGE_TYPE_2D; // todo: Handle array type? ktxTex->isArray
 				}
 				else {
-					imageData.Type = ktxTex->isArray ? aZero::RenderAPI::EImageType::Image1D_Array : aZero::RenderAPI::EImageType::Image1D;
+					imageData.Type = VkImageType::VK_IMAGE_TYPE_1D; // todo: Handle array type? ktxTex->isArray
 				}
 			}
 
@@ -66,7 +67,7 @@ namespace aZero::File
 			imageData.BaseHeight = ktxTex->baseHeight;
 			imageData.DepthOrArrayCount = ktxTex->isArray // Is array?
 				? ktxTex->numLayers // Yes => Array count
-				: imageData.Type == aZero::RenderAPI::EImageType::Image3D ? // No => Is it 3D? Yes => Get depth, No => Set 0 as depth.
+				: imageData.Type == VkImageType::VK_IMAGE_TYPE_3D ? // No => Is it 3D? Yes => Get depth, No => Set 0 as depth.
 				ktxTex->baseDepth : 1.f;
 
 			imageData.MipLevels.resize(ktxTex->numLevels);
@@ -92,8 +93,8 @@ namespace aZero::File
 				imageData.MipLevels[mip].Offset = offset;
 				imageData.MipLevels[mip].SlicePitch = size;
 
-				if (imageData.Format == aZero::RenderAPI::EImageFormat::VK_FORMAT_BC7_UNORM_BLOCK ||
-					imageData.Format == aZero::RenderAPI::EImageFormat::VK_FORMAT_BC7_SRGB_BLOCK)
+				if (imageData.Format == VkFormat::VK_FORMAT_BC7_UNORM_BLOCK ||
+					imageData.Format == VkFormat::VK_FORMAT_BC7_SRGB_BLOCK)
 				{
 					// BC7 - Stores the texture in blocks of 16 bytes.
 					// We calculate the number of blocks and multiply by 16 to get the width.
@@ -139,7 +140,7 @@ namespace aZero::File
 				return {};
 			}
 
-			imageData.Type = aZero::RenderAPI::EImageType::Image2D;
+			imageData.Type = VkImageType::VK_IMAGE_TYPE_2D;
 			imageData.FaceCount = 1;
 			imageData.BaseWidth = width;
 			imageData.BaseHeight = height;
@@ -157,11 +158,11 @@ namespace aZero::File
 
 			if (path.filename().generic_string().ends_with(std::string("_BaseColor") + path.extension().generic_string()))
 			{
-				imageData.Format = aZero::RenderAPI::EImageFormat::VK_FORMAT_R8G8B8A8_SRGB;
+				imageData.Format = VkFormat::VK_FORMAT_R8G8B8A8_SRGB;
 			}
 			else
 			{
-				imageData.Format = aZero::RenderAPI::EImageFormat::VK_FORMAT_R8G8B8A8_UNORM;
+				imageData.Format = VkFormat::VK_FORMAT_R8G8B8A8_UNORM;
 			}
 
 			stbi_image_free(loadedImage);
@@ -180,7 +181,7 @@ namespace aZero::File
 		stbi_uc* loadedImage = stbi_load_from_memory(reinterpret_cast<const stbi_uc*>(memoryPtr + offsetIntoMemoryPtr),
 			static_cast<int32_t>(numBytes), &width, &height, &channels, STBI_rgb_alpha);
 
-		imageData.Type = aZero::RenderAPI::EImageType::Image2D;
+		imageData.Type = VkImageType::VK_IMAGE_TYPE_2D;
 		imageData.FaceCount = 1;
 		imageData.BaseWidth = width;
 		imageData.BaseHeight = height;
@@ -198,11 +199,11 @@ namespace aZero::File
 
 		if (path.filename().generic_string().ends_with(std::string("_BaseColor") + path.extension().generic_string()))
 		{
-			imageData.Format = aZero::RenderAPI::EImageFormat::VK_FORMAT_R8G8B8A8_SRGB;
+			imageData.Format = VkFormat::VK_FORMAT_R8G8B8A8_SRGB;
 		}
 		else
 		{
-			imageData.Format = aZero::RenderAPI::EImageFormat::VK_FORMAT_R8G8B8A8_UNORM;
+			imageData.Format = VkFormat::VK_FORMAT_R8G8B8A8_UNORM;
 		}
 
 		return imageData;

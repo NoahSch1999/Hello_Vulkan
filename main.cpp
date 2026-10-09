@@ -60,7 +60,7 @@ private:
 
             aZero::RenderAPI::ImageView::Desc depthImageViewDesc{
                 .Image = &m_DsImage->Get(),
-                .ImageAspect = aZero::RenderAPI::EImageAspect::DepthStencil
+                .ImageAspect = VkImageAspectFlagBits::VK_IMAGE_ASPECT_DEPTH_BIT | VkImageAspectFlagBits::VK_IMAGE_ASPECT_STENCIL_BIT
             };
             *m_Dsv = aZero::RenderAPI::ImageView(*m_Core, depthImageViewDesc);
         }
@@ -189,8 +189,8 @@ void SetupRenderingPasses(RenderAPI::Core& core, Compiler::Compiler& compiler, R
 
     RenderAPI::Buffer::Desc passBufferDesc{
         .Size = 1024 * 1024,
-        .UsageBits = RenderAPI::EBufferUsageBits::DeviceAddress,
-        .MemoryType = RenderAPI::EMemoryType::BestFit,
+        .UsageBits = VkBufferUsageFlagBits::VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+        .MemoryType = VmaMemoryUsage::VMA_MEMORY_USAGE_AUTO,
         .SeperateHeap = false
     };
 
@@ -217,12 +217,12 @@ void SetupRenderingPasses(RenderAPI::Core& core, Compiler::Compiler& compiler, R
     vars.meshDataBuffer = RenderAPI::Buffer(core, passBufferDesc);
 
     passBufferDesc.Name = "iaBuffer";
-    passBufferDesc.UsageBits = RenderAPI::EBufferUsageBits::DeviceAddress | RenderAPI::EBufferUsageBits::Indirect | RenderAPI::EBufferUsageBits::TransferDst;
+    passBufferDesc.UsageBits = VkBufferUsageFlagBits::VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VkBufferUsageFlagBits::VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VkBufferUsageFlagBits::VK_BUFFER_USAGE_TRANSFER_DST_BIT;
     passBufferDesc.Size = 1024 * 1024,
         vars.iaBuffer = RenderAPI::Buffer(core, passBufferDesc);
 
     passBufferDesc.Name = "scratchBuffer";
-    passBufferDesc.UsageBits = RenderAPI::EBufferUsageBits::DeviceAddress | RenderAPI::EBufferUsageBits::TransferSrc;
+    passBufferDesc.UsageBits = VkBufferUsageFlagBits::VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VkBufferUsageFlagBits::VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
     vars.scratchBuffer = RenderAPI::Buffer(core, passBufferDesc);
 
     aZero::Rendering::PBRMaterial material{
@@ -317,7 +317,7 @@ int main()
 
     RenderAPI::Swapchain::Desc swapChainDesc{
         .Surface = surface,
-        .Format = RenderAPI::EImageFormat::VK_FORMAT_B8G8R8A8_SRGB,
+        .Format = VkFormat::VK_FORMAT_B8G8R8A8_SRGB,
         .FramesInFlight = 3,
         .Width = (uint32_t)window.GetClientDimensions()[0],
         .Height = (uint32_t)window.GetClientDimensions()[1]
@@ -333,7 +333,8 @@ int main()
 
     RenderAPI::ImageView::Desc depthImageViewDesc{
         .Image = &depthImage.Get(),
-        .ImageAspect = RenderAPI::EImageAspect::DepthStencil
+        .Type = VkImageViewType::VK_IMAGE_VIEW_TYPE_2D,
+        .ImageAspect = VkImageAspectFlagBits::VK_IMAGE_ASPECT_DEPTH_BIT | VkImageAspectFlagBits::VK_IMAGE_ASPECT_STENCIL_BIT
     };
 
     RenderAPI::Semaphore sem(core, RenderAPI::ESemaphoreType::Timeline);
@@ -361,7 +362,7 @@ int main()
     RenderAPI::Image::Desc meshImageDesc{
         .Format = imageData.Format,
         .Type = imageData.Type,
-        .Usage = RenderAPI::EImageUsageBits::TransferDst | RenderAPI::EImageUsageBits::Sampled,
+        .Usage = VkImageUsageFlagBits::VK_IMAGE_USAGE_TRANSFER_DST_BIT | VkImageUsageFlagBits::VK_IMAGE_USAGE_SAMPLED_BIT,
         .Width = imageData.BaseWidth, .Height = imageData.BaseHeight, .Depth = imageData.DepthOrArrayCount,
         .MipCount = (uint32_t)imageData.MipLevels.size()
     };
@@ -370,7 +371,8 @@ int main()
 
     RenderAPI::ImageView::Desc meshImageViewDesc{
         .Image = &meshImage,
-        .ImageAspect = RenderAPI::EImageAspect::Color,
+        .Type = VkImageViewType::VK_IMAGE_VIEW_TYPE_2D,
+        .ImageAspect = VkImageAspectFlagBits::VK_IMAGE_ASPECT_COLOR_BIT,
         .LayerStart = 0u,
         .LayerCount = 1u,
         .MipStart = 0,
@@ -381,8 +383,8 @@ int main()
 
     RenderAPI::Buffer::Desc imgSrcBufferDesc{
        .Size = (uint32_t)imageData.Data.size(),
-       .UsageBits = RenderAPI::EBufferUsageBits::TransferSrc,
-       .MemoryType = RenderAPI::EMemoryType::BestFit,
+       .UsageBits = VkBufferUsageFlagBits::VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+       .MemoryType = VmaMemoryUsage::VMA_MEMORY_USAGE_AUTO,
        .SeperateHeap = false
     };
 

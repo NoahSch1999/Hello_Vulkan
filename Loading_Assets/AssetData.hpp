@@ -5,28 +5,28 @@
 #include "UUID.hpp"
 #include "../render_api/Image.hpp"
 
-namespace aZero::RenderAPI
-{
-	inline EImageFormat FromVK_Format(ktx_uint32_t format)
-	{
-		return (EImageFormat)format;
-		//switch (format)
-		//{
-		//	// VK_FORMAT_R8G8B8A8_UNORM
-		//case 37:
-		//	return EImageFormat::RGBA8_UNORM;
-		//	// VK_FORMAT_R8G8B8A8_SRGB 
-		//case 43:
-		//	return EImageFormat::RGBA8_UNORM_SRGB;
-		//case 145:
-		//	return EImageFormat::BC7_UNORM;
-		//case 146:
-		//	return EImageFormat::BC7_UNORM_SRGB;
-		//default:
-		//	return EImageFormat::UNKNOWN;
-		//}
-	}
-}
+//namespace aZero::RenderAPI
+//{
+//	inline EImageFormat FromVK_Format(ktx_uint32_t format)
+//	{
+//		return (EImageFormat)format;
+//		//switch (format)
+//		//{
+//		//	// VK_FORMAT_R8G8B8A8_UNORM
+//		//case 37:
+//		//	return EImageFormat::RGBA8_UNORM;
+//		//	// VK_FORMAT_R8G8B8A8_SRGB 
+//		//case 43:
+//		//	return EImageFormat::RGBA8_UNORM_SRGB;
+//		//case 145:
+//		//	return EImageFormat::BC7_UNORM;
+//		//case 146:
+//		//	return EImageFormat::BC7_UNORM_SRGB;
+//		//default:
+//		//	return EImageFormat::UNKNOWN;
+//		//}
+//	}
+//}
 
 namespace aZero::Asset
 {
@@ -66,7 +66,7 @@ namespace aZero::Asset
 		uint32_t DepthOrArrayCount;
 		std::vector<std::byte> Data;
 		std::vector<Mip> MipLevels;
-		aZero::RenderAPI::EImageFormat Format;
-		aZero::RenderAPI::EImageType Type;
+		VkFormat Format;
+		VkImageType Type;
 	};
 }

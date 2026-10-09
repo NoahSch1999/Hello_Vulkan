@@ -203,7 +203,6 @@ namespace aZero::File
 		std::visit(fastgltf::visitor{
 			[](const auto& arg) {},
 			[&imageData, &path](const fastgltf::sources::URI& filePath) {
-				// todo Figure out how to handle formatting
 				auto res = aZero::File::LoadImageData(path.parent_path() / std::filesystem::path(filePath.uri.path()));
 				if (res.has_value())
 				{

@@ -44,8 +44,7 @@ namespace aZero::RenderAPI
             this->Init(core, desc);
         }
 
-        // todo: Impl fail-safe
-        void Init(Core& core, const Desc& desc)
+        bool Init(Core& core, const Desc& desc)
         {
             VkFilter filterMode =
                 desc.FilterMode == ESamplerFilterMode::Nearest ? VK_FILTER_NEAREST :
@@ -63,9 +62,13 @@ namespace aZero::RenderAPI
                 .maxLod = desc.MaxLod,
             };
 
-            chkSucceed(vkCreateSampler(core.GetLogicalDevice(), &samplerCI, nullptr, &m_Sampler));
-            m_diCore = &core;
-            m_Desc = desc;
+            const bool succeeded = chkSucceed(vkCreateSampler(core.GetLogicalDevice(), &samplerCI, nullptr, &m_Sampler));
+            if (succeeded)
+            {
+                m_diCore = &core;
+			    m_Desc = desc;
+            }
+            return succeeded;
         }
 
         VkSampler Get() const { return m_Sampler; }

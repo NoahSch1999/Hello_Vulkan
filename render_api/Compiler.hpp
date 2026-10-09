@@ -10,27 +10,9 @@
 #include <fstream>
 #include <array>
 
-/*
-    auto slangOptions = std::to_array<slang::CompilerOptionEntry>({
-    {
-        slang::CompilerOptionName::EmitSpirvDirectly,
-        {slang::CompilerOptionValueKind::Int, 1}
-    },
-    {
-        slang::CompilerOptionName::DebugInformation,
-        {slang::CompilerOptionValueKind::Int, SLANG_DEBUG_INFO_LEVEL_STANDARD}
-    },
-    {
-        slang::CompilerOptionName::Optimization,
-        {slang::CompilerOptionValueKind::Int, SLANG_OPTIMIZATION_LEVEL_NONE}
-    }
-    });
-*/
-
 namespace aZero::Compiler
 {
-
-    struct PushConstantRangeReflection // todo Rename to PushConstantRangeReflection
+    struct PushConstantRangeReflection
     {
         VkPushConstantRange Range;
         std::unordered_map<std::string, VkPushConstantRange> Members;
@@ -362,7 +344,6 @@ namespace aZero::Compiler
                         const SpvReflectDescriptorBinding& binding = *set.bindings[k];
                         if (!dsRefl[set.set].LayoutBindings.contains(binding.binding))
                         {
-                            // todo Add binding
                             VkDescriptorSetLayoutBinding vkBinding{
                                 .binding = binding.binding,
                                 .descriptorType = SpirvBindingTypeToVkDescriptorType(binding.descriptor_type),

@@ -36,8 +36,7 @@ namespace aZero::RenderAPI
             this->Init(core, type);
         }
 
-        // todo: Impl fail-safe
-        void Init(Core& core, ESemaphoreType type)
+        bool Init(Core& core, ESemaphoreType type)
         {
             VkSemaphoreCreateInfo semaphoreCI{
                 .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO
@@ -54,10 +53,13 @@ namespace aZero::RenderAPI
                 semaphoreCI.pNext = &timelineCreateInfo;
             }
             
-            chkSucceed(vkCreateSemaphore(core.GetLogicalDevice(), &semaphoreCI, nullptr, &m_Semaphore));
-
-            m_Type = type;
-            m_diCore = &core;
+            const bool succeeded = chkSucceed(vkCreateSemaphore(core.GetLogicalDevice(), &semaphoreCI, nullptr, &m_Semaphore));
+            if (succeeded)
+            {
+                m_Type = type;
+                m_diCore = &core;
+            }
+            return succeeded;
         }
 
         VkSemaphore Get() const { return m_Semaphore; }

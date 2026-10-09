@@ -226,7 +226,7 @@ namespace aZero::RenderAPI
             this->Init(core, desc);
         }
 
-        void Init(Core& core, const Desc& desc)
+        bool Init(Core& core, const Desc& desc)
         {
             VkCommandPoolCreateInfo cmdPoolCI{
                 .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
@@ -234,10 +234,13 @@ namespace aZero::RenderAPI
                 .queueFamilyIndex = core.GetIndexForQueueType(desc.QueueType)
             };
 
-            chkSucceed(vkCreateCommandPool(core.GetLogicalDevice(), &cmdPoolCI, nullptr, &m_CommandPool));
-
-            m_diCore = &core;
-            m_Desc = desc;
+            const bool succeeded = chkSucceed(vkCreateCommandPool(core.GetLogicalDevice(), &cmdPoolCI, nullptr, &m_CommandPool));
+            if(succeeded)
+            {
+                m_diCore = &core;
+                m_Desc = desc;
+            }
+            return succeeded;
         }
 
         std::vector<CommandBuffer> CreateCommandBuffers(const Core& core, uint32_t count)
@@ -250,13 +253,16 @@ namespace aZero::RenderAPI
                 .commandBufferCount = count
             };
 
-            chkSucceed(vkAllocateCommandBuffers(core.GetLogicalDevice(), &cmdBufferInfo, commandBuffers.data()));
-
-            std::vector<CommandBuffer> outp(count);
-            for (uint32_t i = 0; i < count; i++) {
-                outp[i] = CommandBuffer(*m_diCore, commandBuffers[i], m_Desc.QueueType);
+            std::vector<CommandBuffer> output;
+            if (chkSucceed(vkAllocateCommandBuffers(core.GetLogicalDevice(), &cmdBufferInfo, commandBuffers.data())))
+            {
+                output.resize(count);
+                for (uint32_t i = 0; i < count; i++) {
+                    output[i] = CommandBuffer(*m_diCore, commandBuffers[i], m_Desc.QueueType);
+                }
             }
-            return outp;
+
+            return output;
         }
 
         VkCommandPool Get() const { return m_CommandPool; }

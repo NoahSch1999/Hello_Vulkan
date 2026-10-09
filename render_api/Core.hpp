@@ -228,7 +228,6 @@ namespace aZero::RenderAPI
 			}
 			//chk(SDL_Vulkan_GetPresentationSupport(instance, physicalDevices[deviceIndex], queueFamily)); // todo Needed?
 
-			// configure features
 			const std::vector<const char*> deviceExtensions{ // todo Support additional extensions through init args
 				VK_KHR_SWAPCHAIN_EXTENSION_NAME, 
 				VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME, 
@@ -288,7 +287,7 @@ namespace aZero::RenderAPI
 			return true;
 		}
 
-		// todo: Handle support-results
+		// todo: Handle features
 		bool HandleFeatures(
 			VkDeviceCreateInfo& createInfo,
 			VkPhysicalDeviceFeatures2& supportedFeatures,
